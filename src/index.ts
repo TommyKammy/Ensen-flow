@@ -11,6 +11,28 @@ export const baselineInfo: BaselineInfo = {
 };
 
 export {
+  appendWorkflowRunEvent,
+  createWorkflowRun,
+  readWorkflowRunState
+} from "./workflow-run-state.js";
+
+export type {
+  AppendableWorkflowRunEvent,
+  CreateWorkflowRunInput,
+  WorkflowRunCreatedEvent,
+  WorkflowRunEvent,
+  WorkflowRunIdempotencyMetadata,
+  WorkflowRunRecord,
+  WorkflowRunRetryMetadata,
+  WorkflowRunState,
+  WorkflowRunStatus,
+  WorkflowRunTerminalState,
+  WorkflowRunTriggerContext,
+  WorkflowStepAttemptEvent,
+  WorkflowStepAttemptState
+} from "./workflow-run-state.js";
+
+export {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";

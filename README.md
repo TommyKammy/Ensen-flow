@@ -41,6 +41,20 @@ The model records trigger context, idempotency metadata, step attempts, retry
 metadata, timestamps, and explicit terminal states while remaining independent
 from Ensen-loop and external connector contracts.
 
+## Neutral Audit JSONL Events
+
+The local runner can also write append-only JSONL audit events when callers pass
+an `auditPath` to `runWorkflow`. These records use an internal neutral event
+shape for workflow start, step start, step completion, step failure, retry
+scheduling, and workflow completion or failure. Each record includes a stable
+event ID, timestamp, actor and source context, workflow and run references, and
+step references where applicable.
+
+This internal shape is intended to support a later mapping to EIP AuditEvent,
+but it does not claim EIP conformance and does not import Ensen-protocol runtime
+packages. Formal protocol mapping belongs to a later protocol or connector
+integration phase.
+
 ## Local Sequential Runner
 
 The Phase 1 local runner can execute a validated workflow definition through a

@@ -5,6 +5,8 @@ import {
   createWorkflowRun,
   readWorkflowRunState
 } from "./workflow-run-state.js";
+import { createLocalAuditEventWriter } from "./audit-event-writer.js";
+import type { NeutralAuditEventWriter } from "./audit-event-writer.js";
 import type {
   WorkflowRunIdempotencyMetadata,
   WorkflowRunState
@@ -23,6 +25,7 @@ import type {
 export interface RunWorkflowInput {
   definition: WorkflowDefinition;
   statePath: string;
+  auditPath?: string;
   runId?: string;
   triggerContext?: Record<string, unknown>;
   now?: () => string;
@@ -60,6 +63,17 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     input.runId ??
     `${input.definition.id}-${triggerIdempotencyKey?.key ?? "local-run"}`;
   const stepHandler = input.stepHandler ?? defaultWorkflowStepHandler;
+  const auditWriter =
+    input.auditPath === undefined
+      ? undefined
+      : createLocalAuditEventWriter({
+          auditPath: input.auditPath,
+          workflow: {
+            id: input.definition.id,
+            version: workflowDefinitionSchemaVersion
+          },
+          run: { id: runId }
+        });
 
   const existingState = await readExistingRunState(input.statePath);
   if (existingState !== undefined) {
@@ -70,17 +84,23 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     throw new Error("workflow run state already exists but is not terminal; resume is out of scope");
   }
 
+  const triggerReceivedAt = now();
+  const createdAt = now();
   await createWorkflowRun(input.statePath, {
     runId,
     workflowId: input.definition.id,
     workflowVersion: workflowDefinitionSchemaVersion,
     trigger: {
       type: input.definition.trigger.type,
-      receivedAt: now(),
+      receivedAt: triggerReceivedAt,
       context: triggerContext,
       idempotencyKey: triggerIdempotencyKey
     },
-    createdAt: now()
+    createdAt
+  });
+  await auditWriter?.write({
+    type: "workflow.started",
+    occurredAt: createdAt
   });
 
   const orderedSteps = orderSteps(input.definition.steps);
@@ -89,12 +109,19 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     const retryPolicy = step.retry ?? { maxAttempts: 1, backoff: { strategy: "none" as const } };
 
     for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+      const startedAt = now();
       await appendWorkflowRunEvent(input.statePath, {
         type: "step.attempt.started",
         runId,
         stepId: step.id,
         attempt,
-        occurredAt: now()
+        occurredAt: startedAt
+      });
+      await writeStepAuditEvent(auditWriter, {
+        type: "step.started",
+        occurredAt: startedAt,
+        stepId: step.id,
+        attempt
       });
 
       try {
@@ -106,12 +133,20 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           runState: await readWorkflowRunState(input.statePath)
         });
 
+        const completedAt = now();
         await appendWorkflowRunEvent(input.statePath, {
           type: "step.attempt.completed",
           runId,
           stepId: step.id,
           attempt,
-          occurredAt: now()
+          occurredAt: completedAt
+        });
+        await writeStepAuditEvent(auditWriter, {
+          type: "step.completed",
+          occurredAt: completedAt,
+          stepId: step.id,
+          attempt,
+          outcome: { status: "succeeded" }
         });
         break;
       } catch (error) {
@@ -132,25 +167,61 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             reason: errorReason(error)
           }
         });
+        await writeStepAuditEvent(auditWriter, {
+          type: "step.failed",
+          occurredAt: failedAt,
+          stepId: step.id,
+          attempt,
+          retry: {
+            retryable,
+            ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
+            reason: errorReason(error)
+          },
+          outcome: { status: "failed", reason: errorReason(error) }
+        });
 
         if (!retryable) {
+          const completedAt = now();
           await appendWorkflowRunEvent(input.statePath, {
             type: "run.completed",
             runId,
             terminalState: "failed",
-            occurredAt: now()
+            occurredAt: completedAt
+          });
+          await auditWriter?.write({
+            type: "workflow.failed",
+            occurredAt: completedAt,
+            outcome: { status: "failed", reason: errorReason(error) }
           });
           return readWorkflowRunState(input.statePath);
         }
+
+        await writeStepAuditEvent(auditWriter, {
+          type: "step.retry.scheduled",
+          occurredAt: failedAt,
+          stepId: step.id,
+          attempt,
+          retry: {
+            retryable,
+            ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
+            reason: errorReason(error)
+          }
+        });
       }
     }
   }
 
+  const completedAt = now();
   await appendWorkflowRunEvent(input.statePath, {
     type: "run.completed",
     runId,
     terminalState: "succeeded",
-    occurredAt: now()
+    occurredAt: completedAt
+  });
+  await auditWriter?.write({
+    type: "workflow.completed",
+    occurredAt: completedAt,
+    outcome: { status: "succeeded" }
   });
 
   return readWorkflowRunState(input.statePath);
@@ -316,6 +387,38 @@ const errorReason = (error: unknown): string => {
   }
 
   return "step handler failed";
+};
+
+interface StepAuditInput {
+  type: "step.started" | "step.completed" | "step.failed" | "step.retry.scheduled";
+  occurredAt: string;
+  stepId: string;
+  attempt: number;
+  retry?: {
+    retryable: boolean;
+    reason: string;
+    nextAttemptAt?: string;
+  };
+  outcome?: {
+    status: "succeeded" | "failed";
+    reason?: string;
+  };
+}
+
+const writeStepAuditEvent = async (
+  auditWriter: NeutralAuditEventWriter | undefined,
+  input: StepAuditInput
+): Promise<void> => {
+  await auditWriter?.write({
+    type: input.type,
+    occurredAt: input.occurredAt,
+    step: {
+      id: input.stepId,
+      attempt: input.attempt
+    },
+    ...(input.retry === undefined ? {} : { retry: input.retry }),
+    ...(input.outcome === undefined ? {} : { outcome: input.outcome })
+  });
 };
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>

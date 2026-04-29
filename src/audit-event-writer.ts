@@ -78,6 +78,8 @@ export interface CreateLocalAuditEventWriterInput {
 }
 
 const DEFAULT_RUNNER_CONTEXT = "ensen-flow.local-runner";
+const NEUTRAL_AUDIT_ACTOR_TYPE = "system";
+const NEUTRAL_AUDIT_SOURCE_TYPE = "runner";
 const NEUTRAL_AUDIT_EVENT_TYPES = new Set<string>([
   "workflow.started",
   "step.started",
@@ -86,6 +88,12 @@ const NEUTRAL_AUDIT_EVENT_TYPES = new Set<string>([
   "step.retry.scheduled",
   "workflow.completed",
   "workflow.failed"
+]);
+const NEUTRAL_AUDIT_OUTCOME_STATUSES = new Set<string>([
+  "succeeded",
+  "failed",
+  "canceled",
+  "retryable-failed"
 ]);
 const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
@@ -156,7 +164,13 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
 
   requireNonEmptyString(event.id, "audit event id");
   requireIsoTimestamp(event.occurredAt, "audit event occurredAt");
+  if (event.actor.type !== NEUTRAL_AUDIT_ACTOR_TYPE) {
+    throw new Error("audit event actor.type must be system");
+  }
   requireNonEmptyString(event.actor.id, "audit event actor.id");
+  if (event.source.type !== NEUTRAL_AUDIT_SOURCE_TYPE) {
+    throw new Error("audit event source.type must be runner");
+  }
   requireNonEmptyString(event.source.id, "audit event source.id");
   requireNonEmptyString(event.workflow.id, "audit event workflow.id");
   requireNonEmptyString(event.workflow.version, "audit event workflow.version");
@@ -174,6 +188,12 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
     if (event.retry.nextAttemptAt !== undefined) {
       requireIsoTimestamp(event.retry.nextAttemptAt, "audit event retry.nextAttemptAt");
     }
+  }
+
+  if (event.outcome !== undefined && !NEUTRAL_AUDIT_OUTCOME_STATUSES.has(event.outcome.status)) {
+    throw new Error(
+      "audit event outcome.status must be succeeded, failed, canceled, or retryable-failed"
+    );
   }
 
   if (event.outcome?.reason !== undefined) {
@@ -195,7 +215,7 @@ const requireIsoTimestamp = (value: string, label: string): void => {
 
 const isStrictUtcMillisTimestamp = (value: string): boolean => {
   const match = ISO_UTC_MILLIS_TIMESTAMP_PATTERN.exec(value);
-  if (match === null || Number.isNaN(Date.parse(value))) {
+  if (match === null) {
     return false;
   }
 
@@ -209,5 +229,21 @@ const isStrictUtcMillisTimestamp = (value: string): boolean => {
     return false;
   }
 
-  return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    isLeapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ];
+
+  return day >= 1 && day <= daysInMonth[month - 1];
 };

@@ -11,7 +11,7 @@ does not implement workflow schema, state, runner, or audit behavior yet.
 Use the same commands locally that CI runs:
 
 ```sh
-npm install
+npm ci
 npm run build
 npm test
 ```

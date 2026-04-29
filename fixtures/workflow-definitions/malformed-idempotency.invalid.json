@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "bad-idempotency-demo",
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "only-step",
+      "action": {
+        "type": "local",
+        "name": "noop"
+      },
+      "idempotencyKey": {
+        "source": "workflow"
+      }
+    }
+  ]
+}

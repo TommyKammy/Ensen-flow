@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "only-step",
+      "action": {
+        "type": "local",
+        "name": "noop"
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "unsupported-trigger-demo",
+  "trigger": {
+    "type": "ensen-loop",
+    "queue": "loop-specific"
+  },
+  "steps": [
+    {
+      "id": "only-step",
+      "action": {
+        "type": "local",
+        "name": "noop"
+      }
+    }
+  ]
+}

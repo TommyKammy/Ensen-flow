@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "invalid-dependency-demo",
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "first",
+      "action": {
+        "type": "local",
+        "name": "first"
+      }
+    },
+    {
+      "id": "second",
+      "dependsOn": ["missing-step"],
+      "action": {
+        "type": "local",
+        "name": "second"
+      }
+    }
+  ]
+}

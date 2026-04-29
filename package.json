@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "validate:workflow-fixtures": "vitest run test/workflow-definition.test.ts"
   },
   "files": [
     "dist"

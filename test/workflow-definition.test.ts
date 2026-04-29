@@ -27,7 +27,7 @@ describe("workflow definition schema", () => {
     [
       "malformed idempotency semantics",
       "malformed-idempotency.invalid.json",
-      "steps[0].idempotencyKey"
+      "steps[0].idempotencyKey.template"
     ]
   ])("rejects %s", (_name, fixture, path) => {
     const result = validateWorkflowDefinition(readFixture(fixture));

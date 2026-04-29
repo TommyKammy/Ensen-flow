@@ -353,7 +353,7 @@ const validateIdempotencyKey = (
   }
 
   if (value.source === "workflow") {
-    requireNonEmptyString(value, "template", path, errors);
+    requireNonEmptyString(value, "template", `${path}.template`, errors);
   }
 
   if (value.source === "static") {

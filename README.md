@@ -6,8 +6,9 @@ A lightweight workflow orchestration engine.
 
 This repository is in the Phase 1 baseline stage. The current package exposes a
 minimal TypeScript scaffold plus the initial standalone workflow definition
-schema and append-only JSONL workflow run state helpers. It does not implement a
-runner, executor connector, or audit behavior yet.
+schema, append-only JSONL workflow run state helpers, a local sequential runner,
+and neutral audit JSONL events. It does not implement executor connectors,
+Ensen-loop integration, ERPNext behavior, or Pharma/GxP workflow packs yet.
 
 Use the same commands locally that CI runs:
 
@@ -24,6 +25,16 @@ CI runs on pull requests and pushes to `main`, installing dependencies with
 
 This baseline is intentionally independent from Ensen-loop. Runtime workflow
 features and Ensen-loop integration points belong to later Phase 1 issues.
+
+Ensen-flow follows the repo-local short form of the Ensen development charter in
+`docs/mission.md`. Before implementing a change, preserve the charter:
+protocol over shared implementation, bounded execution, evidence before
+authority, and no premature compliance claims.
+
+## Documentation
+
+- `docs/mission.md`: Ensen-flow mission and development charter short form.
+- `docs/workflow-definition.md`: Phase 1 workflow definition schema boundary.
 
 ## Workflow Definition Schema
 

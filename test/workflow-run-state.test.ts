@@ -185,6 +185,14 @@ describe("workflow run JSONL state", () => {
     });
 
     await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-retry-001",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:01.500Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
       type: "step.attempt.failed",
       runId: "run-retry-001",
       stepId: "collect-input",
@@ -202,6 +210,7 @@ describe("workflow run JSONL state", () => {
     expect(state.stepAttempts["collect-input"]).toEqual([
       {
         attempt: 1,
+        startedAt: "2026-04-29T00:00:01.500Z",
         failedAt: "2026-04-29T00:00:02.000Z",
         retry: {
           retryable: true,
@@ -211,5 +220,148 @@ describe("workflow run JSONL state", () => {
         status: "retryable-failed"
       }
     ]);
+  });
+
+  it("rejects appending events before the run is created", async () => {
+    const statePath = await createTempStatePath();
+
+    await expect(
+      appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.started",
+        runId: "run-001",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:02.000Z"
+      })
+    ).rejects.toThrow(
+      "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent"
+    );
+  });
+
+  it("fails closed when records appear after run completion", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "run.completed",
+          runId: "run-001",
+          terminalState: "succeeded",
+          occurredAt: "2026-04-29T00:00:02.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:03.000Z"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 3: no records are allowed after run.completed"
+    );
+  });
+
+  it("fails closed on out-of-order step attempt transitions", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.completed",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:02.000Z"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 2: workflow step attempt collect-input#1: step.attempt.completed requires step.attempt.started first"
+    );
+  });
+
+  it("fails closed on duplicate terminal step attempt transitions", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:02.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.completed",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:03.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.failed",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:04.000Z"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 4: workflow step attempt collect-input#1: step.attempt.failed cannot follow succeeded"
+    );
+  });
+
+  it("rejects non-ISO timestamp strings", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        type: "run.created",
+        runId: "run-001",
+        workflowId: "operator-review",
+        workflowVersion: "flow.workflow.v1",
+        trigger: { type: "manual", receivedAt: "Jan 15, 2024" },
+        occurredAt: "2026-04-29T00:00:01.000Z"
+      }),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 1: receivedAt must be an ISO timestamp string"
+    );
   });
 });

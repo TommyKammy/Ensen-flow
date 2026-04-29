@@ -1,10 +1,18 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+const ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const TERMINAL_STATES = new Set([
   "succeeded",
   "failed",
   "canceled",
+  "retryable-failed"
+]);
+const STEP_ATTEMPT_TERMINAL_STATUSES = new Set([
+  "succeeded",
+  "failed",
   "retryable-failed"
 ]);
 const EVENT_TYPES = new Set([
@@ -170,7 +178,25 @@ export const appendWorkflowRunEvent = async (
 ): Promise<void> => {
   validateWorkflowRunEvent(event, 1);
   await mkdir(dirname(statePath), { recursive: true });
-  await appendFile(statePath, `${JSON.stringify(event)}\n`, "utf8");
+
+  let stateFile;
+  try {
+    stateFile = await open(statePath, constants.O_WRONLY | constants.O_APPEND);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error(
+        "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
+      );
+    }
+
+    throw error;
+  }
+
+  try {
+    await stateFile.writeFile(`${JSON.stringify(event)}\n`, "utf8");
+  } finally {
+    await stateFile.close();
+  }
 };
 
 export const readWorkflowRunState = async (
@@ -201,6 +227,10 @@ export const readWorkflowRunState = async (
 
   events.slice(1).forEach((event, index) => {
     const lineNumber = index + 2;
+    if (run.terminalState !== undefined) {
+      throw new Error(`workflow run state line ${lineNumber}: no records are allowed after run.completed`);
+    }
+
     if (event.type === "run.created") {
       throw new Error(`workflow run state line ${lineNumber}: run.created must only appear once`);
     }
@@ -218,7 +248,7 @@ export const readWorkflowRunState = async (
     }
 
     run.status = run.terminalState ?? "running";
-    applyStepAttemptEvent(stepAttempts, event);
+    applyStepAttemptEvent(stepAttempts, event, lineNumber);
   });
 
   return {
@@ -254,17 +284,18 @@ const parseWorkflowRunEvents = (contents: string): WorkflowRunEvent[] => {
 
 const applyStepAttemptEvent = (
   stepAttempts: Record<string, WorkflowStepAttemptState[]>,
-  event: WorkflowStepAttemptEvent
+  event: WorkflowStepAttemptEvent,
+  lineNumber: number
 ): void => {
   const attempts = (stepAttempts[event.stepId] ??= []);
   let attempt = attempts.find((candidate) => candidate.attempt === event.attempt);
 
   if (event.type === "step.attempt.started") {
     if (attempt !== undefined) {
-      attempt.startedAt = event.occurredAt;
-      attempt.status = "running";
-      attempt.retry = event.retry;
-      return;
+      throw stateError(
+        lineNumber,
+        `workflow step attempt ${event.stepId}#${event.attempt}: step.attempt.started cannot follow ${attempt.status}`
+      );
     }
 
     attempts.push({
@@ -278,13 +309,17 @@ const applyStepAttemptEvent = (
   }
 
   if (attempt === undefined) {
-    attempt = {
-      attempt: event.attempt,
-      retry: event.retry,
-      status: "running"
-    };
-    attempts.push(attempt);
-    attempts.sort((left, right) => left.attempt - right.attempt);
+    throw stateError(
+      lineNumber,
+      `workflow step attempt ${event.stepId}#${event.attempt}: ${event.type} requires step.attempt.started first`
+    );
+  }
+
+  if (STEP_ATTEMPT_TERMINAL_STATUSES.has(attempt.status)) {
+    throw stateError(
+      lineNumber,
+      `workflow step attempt ${event.stepId}#${event.attempt}: ${event.type} cannot follow ${attempt.status}`
+    );
   }
 
   if (event.type === "step.attempt.completed") {
@@ -434,7 +469,7 @@ const requireTimestamp = (
   key: string,
   lineNumber: number
 ): void => {
-  if (typeof value[key] !== "string" || Number.isNaN(Date.parse(value[key]))) {
+  if (typeof value[key] !== "string" || !isStrictIsoTimestamp(value[key])) {
     throw stateError(lineNumber, `${key} must be an ISO timestamp string`);
   }
 };
@@ -454,3 +489,31 @@ const stateError = (lineNumber: number, message: string): Error =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStrictIsoTimestamp = (value: string): boolean => {
+  const match = ISO_TIMESTAMP_PATTERN.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return false;
+  }
+
+  return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+};
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;

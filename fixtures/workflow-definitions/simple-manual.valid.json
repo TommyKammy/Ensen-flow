@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "local-manual-demo",
+  "name": "Local manual demo",
+  "description": "A simple local workflow that can be validated without external executors.",
+  "metadata": {
+    "owner": "workflow-core",
+    "phase": "phase-1"
+  },
+  "trigger": {
+    "type": "manual",
+    "idempotencyKey": {
+      "source": "input",
+      "field": "requestId",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "collect-input",
+      "name": "Collect input",
+      "action": {
+        "type": "local",
+        "name": "collect_input",
+        "with": {
+          "mode": "dry-run"
+        }
+      },
+      "retry": {
+        "maxAttempts": 1,
+        "backoff": {
+          "strategy": "none"
+        }
+      },
+      "idempotencyKey": {
+        "source": "workflow",
+        "template": "{workflow.id}:{step.id}:{trigger.idempotencyKey}"
+      }
+    },
+    {
+      "id": "notify-operator",
+      "name": "Notify operator",
+      "dependsOn": ["collect-input"],
+      "action": {
+        "type": "notification",
+        "name": "operator_notice",
+        "with": {
+          "channel": "operator"
+        }
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "backoff": {
+          "strategy": "fixed",
+          "delayMs": 1000
+        }
+      }
+    }
+  ]
+}

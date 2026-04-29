@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "bad-retry-demo",
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "only-step",
+      "action": {
+        "type": "local",
+        "name": "noop"
+      },
+      "retry": {
+        "maxAttempts": 0,
+        "backoff": {
+          "strategy": "fixed",
+          "delayMs": 500
+        }
+      }
+    }
+  ]
+}

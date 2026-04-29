@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -238,6 +238,81 @@ describe("workflow run JSONL state", () => {
     );
   });
 
+  it("rejects appending events for a different run without modifying state", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    const contentsBeforeAppend = await readFile(statePath, "utf8");
+
+    await expect(
+      appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.started",
+        runId: "run-002",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:02.000Z"
+      })
+    ).rejects.toThrow("appendWorkflowRunEvent event.runId must match the existing workflow run");
+
+    await expect(readFile(statePath, "utf8")).resolves.toBe(contentsBeforeAppend);
+    await expect(readWorkflowRunState(statePath)).resolves.toMatchObject({
+      events: [{ runId: "run-001", type: "run.created" }]
+    });
+  });
+
+  it("rejects appending events after run completion without modifying state", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "run-001",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+
+    const contentsBeforeAppend = await readFile(statePath, "utf8");
+
+    await expect(
+      appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.started",
+        runId: "run-001",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:03.000Z"
+      })
+    ).rejects.toThrow("appendWorkflowRunEvent cannot append to a completed workflow run");
+
+    await expect(readFile(statePath, "utf8")).resolves.toBe(contentsBeforeAppend);
+    await expect(readWorkflowRunState(statePath)).resolves.toMatchObject({
+      run: {
+        runId: "run-001",
+        status: "succeeded",
+        terminalState: "succeeded"
+      }
+    });
+  });
+
   it("fails closed when records appear after run completion", async () => {
     const statePath = await createTempStatePath();
     await writeFile(
@@ -342,6 +417,89 @@ describe("workflow run JSONL state", () => {
 
     await expect(readWorkflowRunState(statePath)).rejects.toThrow(
       "workflow run state line 4: workflow step attempt collect-input#1: step.attempt.failed cannot follow succeeded"
+    );
+  });
+
+  it("fails closed when starting a new attempt before the active attempt finishes", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:02.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 2,
+          occurredAt: "2026-04-29T00:00:03.000Z"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 3: workflow step attempt collect-input#2: step.attempt.started cannot follow running attempt collect-input#1"
+    );
+  });
+
+  it("fails closed when step attempt numbers skip ahead", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:02.000Z"
+        }),
+        JSON.stringify({
+          type: "step.attempt.failed",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:00:03.000Z",
+          retry: {
+            retryable: true,
+            nextAttemptAt: "2026-04-29T00:00:13.000Z"
+          }
+        }),
+        JSON.stringify({
+          type: "step.attempt.started",
+          runId: "run-001",
+          stepId: "collect-input",
+          attempt: 3,
+          occurredAt: "2026-04-29T00:00:14.000Z"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "workflow run state line 4: workflow step attempt collect-input#3: attempt numbers must increase by 1"
     );
   });
 

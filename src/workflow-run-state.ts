@@ -179,6 +179,24 @@ export const appendWorkflowRunEvent = async (
   validateWorkflowRunEvent(event, 1);
   await mkdir(dirname(statePath), { recursive: true });
 
+  const currentState = await readWorkflowRunState(statePath).catch((error: unknown) => {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error(
+        "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
+      );
+    }
+
+    throw error;
+  });
+
+  if (currentState.run.runId !== event.runId) {
+    throw new Error("appendWorkflowRunEvent event.runId must match the existing workflow run");
+  }
+
+  if (currentState.run.terminalState !== undefined) {
+    throw new Error("appendWorkflowRunEvent cannot append to a completed workflow run");
+  }
+
   let stateFile;
   try {
     stateFile = await open(statePath, constants.O_WRONLY | constants.O_APPEND);
@@ -295,6 +313,23 @@ const applyStepAttemptEvent = (
       throw stateError(
         lineNumber,
         `workflow step attempt ${event.stepId}#${event.attempt}: step.attempt.started cannot follow ${attempt.status}`
+      );
+    }
+
+    const runningAttempt = attempts.find((candidate) => candidate.status === "running");
+    if (runningAttempt !== undefined) {
+      throw stateError(
+        lineNumber,
+        `workflow step attempt ${event.stepId}#${event.attempt}: step.attempt.started cannot follow running attempt ${event.stepId}#${runningAttempt.attempt}`
+      );
+    }
+
+    const latestAttempt = attempts.at(-1);
+    const expectedAttempt = latestAttempt === undefined ? 1 : latestAttempt.attempt + 1;
+    if (event.attempt !== expectedAttempt) {
+      throw stateError(
+        lineNumber,
+        `workflow step attempt ${event.stepId}#${event.attempt}: attempt numbers must increase by 1`
       );
     }
 

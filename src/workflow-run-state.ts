@@ -197,6 +197,8 @@ export const appendWorkflowRunEvent = async (
       throw new Error("appendWorkflowRunEvent cannot append to a completed workflow run");
     }
 
+    projectWorkflowRunEvents([...currentState.events, event]);
+
     let stateFile;
     try {
       stateFile = await open(statePath, constants.O_WRONLY | constants.O_APPEND);
@@ -222,6 +224,10 @@ export const readWorkflowRunState = async (
   const contents = await readFile(statePath, "utf8");
   const events = parseWorkflowRunEvents(contents);
 
+  return projectWorkflowRunEvents(events);
+};
+
+const projectWorkflowRunEvents = (events: WorkflowRunEvent[]): WorkflowRunState => {
   if (events.length === 0) {
     throw new Error("workflow run state must contain a run.created record");
   }
@@ -329,6 +335,13 @@ const applyStepAttemptEvent = (
       throw stateError(
         lineNumber,
         `workflow step attempt ${event.stepId}#${event.attempt}: attempt numbers must increase by 1`
+      );
+    }
+
+    if (latestAttempt !== undefined && latestAttempt.status !== "retryable-failed") {
+      throw stateError(
+        lineNumber,
+        `workflow step attempt ${event.stepId}#${event.attempt}: step.attempt.started cannot follow ${latestAttempt.status}`
       );
     }
 

@@ -281,6 +281,120 @@ describe("workflow run JSONL state", () => {
     ]);
   });
 
+  it("allows the next attempt after a retryable failed attempt", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-retry-002",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-retry-002",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:01.500Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.failed",
+      runId: "run-retry-002",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z",
+      retry: {
+        retryable: true,
+        nextAttemptAt: "2026-04-29T00:00:12.000Z"
+      }
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-retry-002",
+      stepId: "collect-input",
+      attempt: 2,
+      occurredAt: "2026-04-29T00:00:12.000Z"
+    });
+
+    const state = await readWorkflowRunState(statePath);
+
+    expect(state.stepAttempts["collect-input"]).toMatchObject([
+      { attempt: 1, status: "retryable-failed" },
+      { attempt: 2, status: "running" }
+    ]);
+  });
+
+  it.each([
+    {
+      event: {
+        type: "step.attempt.completed" as const,
+        occurredAt: "2026-04-29T00:00:02.000Z"
+      },
+      expectedStatus: "succeeded"
+    },
+    {
+      event: {
+        type: "step.attempt.failed" as const,
+        occurredAt: "2026-04-29T00:00:02.000Z",
+        retry: { retryable: false }
+      },
+      expectedStatus: "failed"
+    }
+  ])(
+    "fails closed when a new attempt follows a $expectedStatus attempt",
+    async ({ event, expectedStatus }) => {
+      const statePath = await createTempStatePath();
+
+      await createWorkflowRun(statePath, {
+        runId: "run-retry-003",
+        workflowId: "operator-review",
+        workflowVersion: "flow.workflow.v1",
+        trigger: {
+          type: "manual",
+          receivedAt: "2026-04-29T00:00:00.000Z"
+        },
+        createdAt: "2026-04-29T00:00:01.000Z"
+      });
+
+      await appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.started",
+        runId: "run-retry-003",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:01.500Z"
+      });
+
+      await appendWorkflowRunEvent(statePath, {
+        ...event,
+        runId: "run-retry-003",
+        stepId: "collect-input",
+        attempt: 1
+      });
+
+      const contentsBeforeRejectedAppend = await readFile(statePath, "utf8");
+
+      await expect(
+        appendWorkflowRunEvent(statePath, {
+          type: "step.attempt.started",
+          runId: "run-retry-003",
+          stepId: "collect-input",
+          attempt: 2,
+          occurredAt: "2026-04-29T00:00:03.000Z"
+        })
+      ).rejects.toThrow(
+        `workflow run state line 4: workflow step attempt collect-input#2: step.attempt.started cannot follow ${expectedStatus}`
+      );
+      await expect(readFile(statePath, "utf8")).resolves.toBe(contentsBeforeRejectedAppend);
+    }
+  );
+
   it("rejects appending events before the run is created", async () => {
     const statePath = await createTempStatePath();
 

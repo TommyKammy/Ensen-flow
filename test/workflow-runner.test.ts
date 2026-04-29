@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -21,6 +21,18 @@ const createTempStatePath = async () => {
   return join(root, "runs", "manual-run.jsonl");
 };
 
+const createTempAuditPath = async () => {
+  const root = await mkdtemp(join(tmpdir(), "ensen-flow-audit-"));
+  tempRoots.push(root);
+  return join(root, "audit", "manual-run.audit.jsonl");
+};
+
+const readAuditEvents = async (auditPath: string): Promise<Array<Record<string, unknown>>> =>
+  (await readFile(auditPath, "utf8"))
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+
 afterEach(async () => {
   await Promise.all(
     tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
@@ -28,6 +40,57 @@ afterEach(async () => {
 });
 
 describe("sequential workflow runner", () => {
+  it("emits deterministic neutral audit events for a successful run", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-audit"
+      },
+      now: (() => {
+        let index = 0;
+        const timestamps = [
+          "2026-04-29T00:03:00.000Z",
+          "2026-04-29T00:03:01.000Z",
+          "2026-04-29T00:03:02.000Z",
+          "2026-04-29T00:03:03.000Z",
+          "2026-04-29T00:03:04.000Z",
+          "2026-04-29T00:03:05.000Z"
+        ];
+        return () => timestamps[index++] ?? "2026-04-29T00:03:06.000Z";
+      })()
+    });
+
+    const auditEvents = await readAuditEvents(auditPath);
+
+    expect(auditEvents.map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.completed",
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
+    expect(auditEvents[0]).toMatchObject({
+      id: "audit.local-manual-demo-manual-audit.000001",
+      occurredAt: "2026-04-29T00:03:01.000Z",
+      actor: { type: "system", id: "ensen-flow.local-runner" },
+      source: { type: "runner", id: "ensen-flow.local-runner" },
+      workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+      run: { id: "local-manual-demo-manual-audit" }
+    });
+    expect(auditEvents[1]).toMatchObject({
+      id: "audit.local-manual-demo-manual-audit.000002",
+      occurredAt: "2026-04-29T00:03:02.000Z",
+      step: { id: "collect-input", attempt: 1 }
+    });
+  });
+
   it("runs the simple manual workflow fixture to completion", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
@@ -76,11 +139,13 @@ describe("sequential workflow runner", () => {
   it("records retryable failures and retries according to the step policy", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
     let calls = 0;
 
     const result = await runWorkflow({
       definition,
       statePath,
+      auditPath,
       triggerContext: {
         requestId: "manual-retry"
       },
@@ -128,15 +193,40 @@ describe("sequential workflow runner", () => {
         status: "succeeded"
       }
     ]);
+
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.completed",
+      "step.started",
+      "step.failed",
+      "step.retry.scheduled",
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
+    expect(auditEvents[5]).toMatchObject({
+      type: "step.retry.scheduled",
+      occurredAt: "2026-04-29T00:01:05.000Z",
+      step: { id: "notify-operator", attempt: 1 },
+      retry: {
+        retryable: true,
+        nextAttemptAt: "2026-04-29T00:01:06.000Z",
+        reason: "operator notice transport unavailable"
+      }
+    });
   });
 
   it("records failed steps with diagnostic retry metadata", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
 
     const result = await runWorkflow({
       definition,
       statePath,
+      auditPath,
       triggerContext: {
         requestId: "manual-failed"
       },
@@ -172,6 +262,22 @@ describe("sequential workflow runner", () => {
         status: "failed"
       }
     ]);
+
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.failed",
+      "workflow.failed"
+    ]);
+    expect(auditEvents[3]).toMatchObject({
+      type: "workflow.failed",
+      occurredAt: "2026-04-29T00:02:04.000Z",
+      outcome: {
+        status: "failed",
+        reason: "manual input was incomplete"
+      }
+    });
   });
 
   it("returns the existing terminal run when the idempotency key matches", async () => {

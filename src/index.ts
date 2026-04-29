@@ -16,6 +16,8 @@ export {
   readWorkflowRunState
 } from "./workflow-run-state.js";
 
+export { createLocalAuditEventWriter } from "./audit-event-writer.js";
+
 export type {
   AppendableWorkflowRunEvent,
   CreateWorkflowRunInput,
@@ -60,3 +62,18 @@ export type {
   WorkflowStepHandler,
   WorkflowStepHandlerInput
 } from "./workflow-runner.js";
+
+export type {
+  CreateLocalAuditEventWriterInput,
+  CreateNeutralAuditEventInput,
+  NeutralAuditActorContext,
+  NeutralAuditEvent,
+  NeutralAuditEventType,
+  NeutralAuditEventWriter,
+  NeutralAuditOutcomeContext,
+  NeutralAuditRetryContext,
+  NeutralAuditRunReference,
+  NeutralAuditSourceContext,
+  NeutralAuditStepReference,
+  NeutralAuditWorkflowReference
+} from "./audit-event-writer.js";

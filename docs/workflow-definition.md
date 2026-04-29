@@ -26,6 +26,12 @@ persistence behavior, executor connector configuration, or real Slack, Teams,
 ERPNext, GitHub, or other connector behavior. Those concerns are deferred to
 later Phase 1 issues.
 
+Runner audit output is intentionally separate from the workflow definition
+schema. The Phase 1 runner writes an internal neutral JSONL audit shape for
+local lifecycle activity only; a formal mapping to EIP AuditEvent is deferred to
+a later protocol or connector integration phase and does not depend on
+Ensen-protocol runtime packages here.
+
 Approval and notification are represented only as neutral action concepts. A
 definition can name that a step requires an approval or notification action, but
 the schema does not bind that action to a provider, credential, channel, or

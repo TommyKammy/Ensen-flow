@@ -136,6 +136,39 @@ describe("sequential workflow runner", () => {
     ]);
   });
 
+  it("runs a valid manual workflow without trigger idempotency metadata", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    delete definition.trigger.idempotencyKey;
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      now: (() => {
+        let index = 0;
+        const timestamps = [
+          "2026-04-29T00:04:00.000Z",
+          "2026-04-29T00:04:01.000Z",
+          "2026-04-29T00:04:02.000Z",
+          "2026-04-29T00:04:03.000Z",
+          "2026-04-29T00:04:04.000Z",
+          "2026-04-29T00:04:05.000Z"
+        ];
+        return () => timestamps[index++] ?? "2026-04-29T00:04:06.000Z";
+      })()
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.run.trigger).toEqual({
+      type: "manual",
+      receivedAt: "2026-04-29T00:04:00.000Z",
+      context: {}
+    });
+
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.run.trigger).toEqual(result.run.trigger);
+  });
+
   it("records retryable failures and retries according to the step policy", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();

@@ -94,7 +94,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       type: input.definition.trigger.type,
       receivedAt: triggerReceivedAt,
       context: triggerContext,
-      idempotencyKey: triggerIdempotencyKey
+      ...(triggerIdempotencyKey === undefined ? {} : { idempotencyKey: triggerIdempotencyKey })
     },
     createdAt
   });

@@ -51,6 +51,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     throw new Error(`workflow definition is invalid: ${details}`);
   }
 
+  const orderedSteps = orderSteps(input.definition.steps);
   const now = input.now ?? (() => new Date().toISOString());
   const triggerContext = input.triggerContext ?? {};
   const triggerIdempotencyKey = resolveIdempotencyKey(
@@ -102,8 +103,6 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     type: "workflow.started",
     occurredAt: createdAt
   });
-
-  const orderedSteps = orderSteps(input.definition.steps);
 
   for (const step of orderedSteps) {
     const retryPolicy = step.retry ?? { maxAttempts: 1, backoff: { strategy: "none" as const } };

@@ -14,12 +14,13 @@ const readFixture = (name: string): unknown =>
 
 type MutableWorkflowFixture = {
   trigger: Record<string, unknown>;
-  steps: Array<{
+  steps: Array<Record<string, unknown> & {
     action: Record<string, unknown>;
+    dependsOn?: string[];
     retry?: Record<string, unknown> & { backoff?: Record<string, unknown> };
     idempotencyKey?: Record<string, unknown>;
   }>;
-};
+} & Record<string, unknown>;
 
 const readMutableWorkflowFixture = (): MutableWorkflowFixture =>
   readFixture("simple-manual.valid.json") as MutableWorkflowFixture;
@@ -99,6 +100,20 @@ describe("workflow definition schema", () => {
 
   it.each([
     [
+      "workflow",
+      "workflow.extra",
+      (workflow: MutableWorkflowFixture) => {
+        workflow.extra = true;
+      }
+    ],
+    [
+      "step",
+      "steps[0].extra",
+      (workflow: MutableWorkflowFixture) => {
+        workflow.steps[0].extra = true;
+      }
+    ],
+    [
       "trigger",
       "trigger.extra",
       (workflow: MutableWorkflowFixture) => {
@@ -146,6 +161,39 @@ describe("workflow definition schema", () => {
         {
           path,
           message: "extra is outside the workflow definition schema boundary"
+        }
+      ]);
+    }
+  );
+
+  it.each([
+    [
+      "single self-reference",
+      (workflow: MutableWorkflowFixture) => {
+        workflow.steps[0].dependsOn = ["collect-input"];
+      },
+      "steps[0].dependsOn[0]"
+    ],
+    [
+      "list containing the current step",
+      (workflow: MutableWorkflowFixture) => {
+        workflow.steps[1].dependsOn = ["collect-input", "notify-operator"];
+      },
+      "steps[1].dependsOn[1]"
+    ]
+  ] satisfies Array<[string, (workflow: MutableWorkflowFixture) => void, string]>)(
+    "rejects dependsOn %s",
+    (_name, mutate, path) => {
+      const workflow = readMutableWorkflowFixture();
+      mutate(workflow);
+
+      const result = validateWorkflowDefinition(workflow);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual([
+        {
+          path,
+          message: "dependsOn entries cannot reference the current step"
         }
       ]);
     }

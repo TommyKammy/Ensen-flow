@@ -34,6 +34,24 @@ const IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set([
 const INPUT_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "field", "required"]);
 const WORKFLOW_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "template"]);
 const STATIC_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "value"]);
+const WORKFLOW_ALLOWED_KEYS = new Set([
+  "schemaVersion",
+  "id",
+  "name",
+  "description",
+  "metadata",
+  "trigger",
+  "steps"
+]);
+const STEP_ALLOWED_KEYS = new Set([
+  "id",
+  "name",
+  "dependsOn",
+  "action",
+  "retry",
+  "idempotencyKey",
+  "metadata"
+]);
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -135,6 +153,7 @@ export const validateWorkflowDefinition = (
   }
 
   rejectEnsenLoopSpecificFields(value, "", errors);
+  rejectUnknownKeys(value, WORKFLOW_ALLOWED_KEYS, "", errors);
   requireLiteral(value, "schemaVersion", WORKFLOW_SCHEMA_VERSION, errors);
   requireStableId(value, "id", "workflow.id", errors);
   optionalString(value, "name", "workflow.name", errors);
@@ -216,6 +235,7 @@ const validateSteps = (
     }
 
     rejectEnsenLoopSpecificFields(step, path, errors);
+    rejectUnknownKeys(step, STEP_ALLOWED_KEYS, path, errors);
     requireStableId(step, "id", `${path}.id`, errors);
 
     if (typeof step.id === "string" && STABLE_ID_PATTERN.test(step.id)) {
@@ -234,7 +254,7 @@ const validateSteps = (
     const path = `steps[${index}]`;
     optionalString(step, "name", `${path}.name`, errors);
     optionalRecord(step, "metadata", `${path}.metadata`, errors);
-    validateDependencies(step.dependsOn, stepIds, `${path}.dependsOn`, errors);
+    validateDependencies(step.dependsOn, stepIds, step.id, `${path}.dependsOn`, errors);
     validateAction(step.action, `${path}.action`, errors);
 
     if ("retry" in step) {
@@ -250,6 +270,7 @@ const validateSteps = (
 const validateDependencies = (
   value: unknown,
   stepIds: Set<string>,
+  currentStepId: unknown,
   path: string,
   errors: WorkflowDefinitionValidationError[]
 ): void => {
@@ -268,6 +289,14 @@ const validateDependencies = (
       errors.push({
         path: dependencyPath,
         message: "dependsOn entries must be stable step IDs"
+      });
+      return;
+    }
+
+    if (typeof currentStepId === "string" && dependency === currentStepId) {
+      errors.push({
+        path: dependencyPath,
+        message: "dependsOn entries cannot reference the current step"
       });
       return;
     }

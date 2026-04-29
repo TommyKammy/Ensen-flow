@@ -136,6 +136,28 @@ describe("sequential workflow runner", () => {
     ]);
   });
 
+  it("rejects cyclic dependencies before writing state or audit records", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps[0].dependsOn = ["notify-operator"];
+    definition.steps[1].dependsOn = ["collect-input"];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-cycle"
+        }
+      })
+    ).rejects.toThrow("workflow definition dependencies cannot be ordered");
+
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("runs a valid manual workflow without trigger idempotency metadata", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     delete definition.trigger.idempotencyKey;

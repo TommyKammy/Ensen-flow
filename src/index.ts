@@ -37,6 +37,11 @@ export {
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
 
+export {
+  loadWorkflowDefinitionFile,
+  runWorkflow
+} from "./workflow-runner.js";
+
 export type {
   IdempotencyKeyDefinition,
   RetryBackoffPolicy,
@@ -49,3 +54,9 @@ export type {
   WorkflowStep,
   WorkflowTrigger
 } from "./workflow-definition.js";
+
+export type {
+  RunWorkflowInput,
+  WorkflowStepHandler,
+  WorkflowStepHandlerInput
+} from "./workflow-runner.js";

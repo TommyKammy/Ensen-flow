@@ -6,8 +6,8 @@ A lightweight workflow orchestration engine.
 
 This repository is in the Phase 1 baseline stage. The current package exposes a
 minimal TypeScript scaffold plus the initial standalone workflow definition
-schema. It does not implement workflow state, runner, executor connector, or
-audit behavior yet.
+schema and append-only JSONL workflow run state helpers. It does not implement a
+runner, executor connector, or audit behavior yet.
 
 Use the same commands locally that CI runs:
 
@@ -32,3 +32,11 @@ The initial standalone workflow definition schema is documented in
 It validates versioned workflow definitions, stable workflow and step IDs,
 trigger shape, dependencies, retry policy, neutral actions, and idempotency key
 semantics without contacting Ensen-loop or external executor connectors.
+
+## Workflow Run JSONL State
+
+Workflow run state can be persisted locally with append-only JSONL records via
+`createWorkflowRun`, `appendWorkflowRunEvent`, and `readWorkflowRunState`.
+The model records trigger context, idempotency metadata, step attempts, retry
+metadata, timestamps, and explicit terminal states while remaining independent
+from Ensen-loop and external connector contracts.

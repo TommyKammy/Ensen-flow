@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const ISO_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -59,6 +59,7 @@ const IDEMPOTENCY_METADATA_ALLOWED_KEYS = new Set([
   "source",
   "key"
 ]);
+const statePathAppendLocks = new Map<string, Promise<void>>();
 
 export type WorkflowRunTerminalState =
   | "succeeded"
@@ -179,42 +180,40 @@ export const appendWorkflowRunEvent = async (
   validateWorkflowRunEvent(event, 1);
   await mkdir(dirname(statePath), { recursive: true });
 
-  const currentState = await readWorkflowRunState(statePath).catch((error: unknown) => {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      throw new Error(
-        "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
-      );
+  await withStatePathAppendLock(statePath, async () => {
+    const currentState = await readWorkflowRunState(statePath).catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        throw missingWorkflowRunStateError();
+      }
+
+      throw error;
+    });
+
+    if (currentState.run.runId !== event.runId) {
+      throw new Error("appendWorkflowRunEvent event.runId must match the existing workflow run");
     }
 
-    throw error;
+    if (currentState.run.terminalState !== undefined) {
+      throw new Error("appendWorkflowRunEvent cannot append to a completed workflow run");
+    }
+
+    let stateFile;
+    try {
+      stateFile = await open(statePath, constants.O_WRONLY | constants.O_APPEND);
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        throw missingWorkflowRunStateError();
+      }
+
+      throw error;
+    }
+
+    try {
+      await stateFile.writeFile(`${JSON.stringify(event)}\n`, "utf8");
+    } finally {
+      await stateFile.close();
+    }
   });
-
-  if (currentState.run.runId !== event.runId) {
-    throw new Error("appendWorkflowRunEvent event.runId must match the existing workflow run");
-  }
-
-  if (currentState.run.terminalState !== undefined) {
-    throw new Error("appendWorkflowRunEvent cannot append to a completed workflow run");
-  }
-
-  let stateFile;
-  try {
-    stateFile = await open(statePath, constants.O_WRONLY | constants.O_APPEND);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      throw new Error(
-        "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
-      );
-    }
-
-    throw error;
-  }
-
-  try {
-    await stateFile.writeFile(`${JSON.stringify(event)}\n`, "utf8");
-  } finally {
-    await stateFile.close();
-  }
 };
 
 export const readWorkflowRunState = async (
@@ -435,6 +434,10 @@ const validateTrigger = (value: unknown, lineNumber: number): void => {
     throw stateError(lineNumber, "trigger.context must be an object");
   }
 
+  if ("context" in value) {
+    validateJsonSerializableValue(value.context, lineNumber, "trigger.context");
+  }
+
   if ("idempotencyKey" in value) {
     validateIdempotencyMetadata(value.idempotencyKey, lineNumber);
   }
@@ -524,6 +527,103 @@ const stateError = (lineNumber: number, message: string): Error =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const withStatePathAppendLock = async <T>(
+  statePath: string,
+  operation: () => Promise<T>
+): Promise<T> => {
+  const lockKey = resolve(statePath);
+  const previousLock = statePathAppendLocks.get(lockKey) ?? Promise.resolve();
+  let releaseLock: () => void = () => undefined;
+  const currentLock = new Promise<void>((resolveLock) => {
+    releaseLock = resolveLock;
+  });
+  const nextLock = previousLock.catch(() => undefined).then(() => currentLock);
+  statePathAppendLocks.set(lockKey, nextLock);
+
+  await previousLock.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    releaseLock();
+    if (statePathAppendLocks.get(lockKey) === nextLock) {
+      statePathAppendLocks.delete(lockKey);
+    }
+  }
+};
+
+const missingWorkflowRunStateError = (): Error =>
+  new Error(
+    "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
+  );
+
+const validateJsonSerializableValue = (
+  value: unknown,
+  lineNumber: number,
+  path: string,
+  seen: WeakSet<object> = new WeakSet()
+): void => {
+  if (value === null) {
+    return;
+  }
+
+  if (typeof value === "string" || typeof value === "boolean") {
+    return;
+  }
+
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) {
+      return;
+    }
+
+    throw stateError(lineNumber, `${path} must contain only finite numbers`);
+  }
+
+  if (Array.isArray(value)) {
+    validateJsonContainer(value, lineNumber, path, seen, () => {
+      value.forEach((item, index) => {
+        validateJsonSerializableValue(item, lineNumber, `${path}[${index}]`, seen);
+      });
+    });
+    return;
+  }
+
+  if (isRecord(value) && isPlainJsonObject(value)) {
+    validateJsonContainer(value, lineNumber, path, seen, () => {
+      Object.entries(value).forEach(([key, item]) => {
+        validateJsonSerializableValue(item, lineNumber, `${path}.${key}`, seen);
+      });
+    });
+    return;
+  }
+
+  throw stateError(lineNumber, `${path} must contain only JSON-serializable values`);
+};
+
+const validateJsonContainer = (
+  value: object,
+  lineNumber: number,
+  path: string,
+  seen: WeakSet<object>,
+  validateChildren: () => void
+): void => {
+  if (seen.has(value)) {
+    throw stateError(lineNumber, `${path} must not contain circular references`);
+  }
+
+  seen.add(value);
+  try {
+    validateChildren();
+  } finally {
+    seen.delete(value);
+  }
+};
+
+const isPlainJsonObject = (value: Record<string, unknown>): boolean => {
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
+};
 
 const isStrictIsoTimestamp = (value: string): boolean => {
   const match = ISO_TIMESTAMP_PATTERN.exec(value);

@@ -39,7 +39,11 @@ describe("workflow run JSONL state", () => {
         receivedAt: "2026-04-29T00:00:00.000Z",
         context: {
           operator: "local-test",
-          source: "unit-test"
+          source: "unit-test",
+          payload: {
+            retryable: true,
+            labels: ["review", null, 2]
+          }
         },
         idempotencyKey: {
           source: "input",
@@ -86,7 +90,11 @@ describe("workflow run JSONL state", () => {
       receivedAt: "2026-04-29T00:00:00.000Z",
       context: {
         operator: "local-test",
-        source: "unit-test"
+        source: "unit-test",
+        payload: {
+          retryable: true,
+          labels: ["review", null, 2]
+        }
       },
       idempotencyKey: {
         source: "input",
@@ -138,6 +146,57 @@ describe("workflow run JSONL state", () => {
     await expect(readWorkflowRunState(statePath)).rejects.toThrow(
       "workflow run state line 2: terminalState must be succeeded, failed, canceled, or retryable-failed"
     );
+  });
+
+  it.each([
+    { context: { dropped: undefined }, message: "trigger.context.dropped must contain only JSON-serializable values" },
+    { context: { fn: () => undefined }, message: "trigger.context.fn must contain only JSON-serializable values" },
+    { context: { marker: Symbol("bad") }, message: "trigger.context.marker must contain only JSON-serializable values" },
+    { context: { count: 1n }, message: "trigger.context.count must contain only JSON-serializable values" },
+    { context: { value: Number.NaN }, message: "trigger.context.value must contain only finite numbers" },
+    { context: { received: new Date("2026-04-29T00:00:00.000Z") }, message: "trigger.context.received must contain only JSON-serializable values" }
+  ])("rejects non-JSON trigger context values before writing %#", async ({ context, message }) => {
+    const statePath = await createTempStatePath();
+
+    await expect(
+      createWorkflowRun(statePath, {
+        runId: "run-001",
+        workflowId: "operator-review",
+        workflowVersion: "flow.workflow.v1",
+        trigger: {
+          type: "manual",
+          receivedAt: "2026-04-29T00:00:00.000Z",
+          context
+        },
+        createdAt: "2026-04-29T00:00:01.000Z"
+      })
+    ).rejects.toThrow(`workflow run state line 1: ${message}`);
+
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects circular trigger context values before writing", async () => {
+    const statePath = await createTempStatePath();
+    const context: Record<string, unknown> = {};
+    context.self = context;
+
+    await expect(
+      createWorkflowRun(statePath, {
+        runId: "run-001",
+        workflowId: "operator-review",
+        workflowVersion: "flow.workflow.v1",
+        trigger: {
+          type: "manual",
+          receivedAt: "2026-04-29T00:00:00.000Z",
+          context
+        },
+        createdAt: "2026-04-29T00:00:01.000Z"
+      })
+    ).rejects.toThrow(
+      "workflow run state line 1: trigger.context.self must not contain circular references"
+    );
+
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each(["succeeded", "failed", "canceled", "retryable-failed"] as const)(
@@ -311,6 +370,52 @@ describe("workflow run JSONL state", () => {
         terminalState: "succeeded"
       }
     });
+  });
+
+  it("serializes concurrent terminal appends for the same state file", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    const results = await Promise.allSettled([
+      appendWorkflowRunEvent(statePath, {
+        type: "run.completed",
+        runId: "run-001",
+        terminalState: "succeeded",
+        occurredAt: "2026-04-29T00:00:02.000Z"
+      }),
+      appendWorkflowRunEvent(statePath, {
+        type: "run.completed",
+        runId: "run-001",
+        terminalState: "failed",
+        occurredAt: "2026-04-29T00:00:03.000Z"
+      })
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({
+      reason: expect.objectContaining({
+        message: "appendWorkflowRunEvent cannot append to a completed workflow run"
+      })
+    });
+
+    const lines = (await readFile(statePath, "utf8")).trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+
+    const state = await readWorkflowRunState(statePath);
+    expect(["succeeded", "failed"]).toContain(state.run.terminalState);
+    expect(state.events.map((event) => event.type)).toEqual(["run.created", "run.completed"]);
   });
 
   it("fails closed when records appear after run completion", async () => {

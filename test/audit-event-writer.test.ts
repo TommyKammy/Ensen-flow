@@ -27,6 +27,40 @@ afterEach(async () => {
 });
 
 describe("neutral audit event writer", () => {
+  it("freezes constructor context snapshots before later caller mutation", async () => {
+    const auditPath = await createTempAuditPath();
+    const workflow = { id: "trusted-workflow", version: "flow.workflow.v1" };
+    const run = { id: "trusted-run" };
+    const actor = { type: "system" as const, id: "trusted-actor" };
+    const source = { type: "runner" as const, id: "trusted-source" };
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow,
+      run,
+      actor,
+      source
+    });
+
+    workflow.id = "mutated-workflow";
+    workflow.version = "flow.workflow.mutated";
+    run.id = "mutated-run";
+    actor.id = "mutated-actor";
+    source.id = "mutated-source";
+
+    await writer.write({
+      type: "workflow.started",
+      occurredAt: "2026-04-29T00:00:00.000Z"
+    });
+
+    await expect(readAuditEvent(auditPath)).resolves.toMatchObject({
+      id: "audit.trusted-run.000001",
+      actor: { type: "system", id: "trusted-actor" },
+      source: { type: "runner", id: "trusted-source" },
+      workflow: { id: "trusted-workflow", version: "flow.workflow.v1" },
+      run: { id: "trusted-run" }
+    });
+  });
+
   it("does not let runtime event input override trusted audit fields", async () => {
     const auditPath = await createTempAuditPath();
     const writer = createLocalAuditEventWriter({
@@ -57,5 +91,49 @@ describe("neutral audit event writer", () => {
       workflow: { id: "trusted-workflow", version: "flow.workflow.v1" },
       run: { id: "trusted-run" }
     });
+  });
+
+  it("rejects runtime event types outside the neutral audit union", async () => {
+    const auditPath = await createTempAuditPath();
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow: { id: "trusted-workflow", version: "flow.workflow.v1" },
+      run: { id: "trusted-run" }
+    });
+
+    await expect(
+      writer.write({
+        type: "workflow.deleted",
+        occurredAt: "2026-04-29T00:00:00.000Z"
+      } as unknown as CreateNeutralAuditEventInput)
+    ).rejects.toThrow("audit event type is invalid");
+  });
+
+  it("rejects non-UTC or locale timestamp strings", async () => {
+    const auditPath = await createTempAuditPath();
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow: { id: "trusted-workflow", version: "flow.workflow.v1" },
+      run: { id: "trusted-run" }
+    });
+
+    await expect(
+      writer.write({
+        type: "workflow.started",
+        occurredAt: "04/29/2026"
+      })
+    ).rejects.toThrow("audit event occurredAt must be an ISO timestamp string");
+    await expect(
+      writer.write({
+        type: "step.retry.scheduled",
+        occurredAt: "2026-04-29T00:00:00+09:00",
+        step: { id: "approval", attempt: 1 },
+        retry: {
+          retryable: true,
+          reason: "temporary failure",
+          nextAttemptAt: "2026-04-29T00:01:00+09:00"
+        }
+      })
+    ).rejects.toThrow("audit event occurredAt must be an ISO timestamp string");
   });
 });

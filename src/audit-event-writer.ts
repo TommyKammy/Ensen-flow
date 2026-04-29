@@ -78,32 +78,60 @@ export interface CreateLocalAuditEventWriterInput {
 }
 
 const DEFAULT_RUNNER_CONTEXT = "ensen-flow.local-runner";
+const NEUTRAL_AUDIT_EVENT_TYPES = new Set<string>([
+  "workflow.started",
+  "step.started",
+  "step.completed",
+  "step.failed",
+  "step.retry.scheduled",
+  "workflow.completed",
+  "workflow.failed"
+]);
+const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
 
 export const createLocalAuditEventWriter = (
   input: CreateLocalAuditEventWriterInput
 ): NeutralAuditEventWriter => {
   let sequence = 0;
-  const actor = input.actor ?? { type: "system" as const, id: DEFAULT_RUNNER_CONTEXT };
-  const source = input.source ?? { type: "runner" as const, id: DEFAULT_RUNNER_CONTEXT };
+  const auditPath = input.auditPath;
+  const actor = Object.freeze(
+    input.actor === undefined
+      ? { type: "system" as const, id: DEFAULT_RUNNER_CONTEXT }
+      : { ...input.actor }
+  );
+  const source = Object.freeze(
+    input.source === undefined
+      ? { type: "runner" as const, id: DEFAULT_RUNNER_CONTEXT }
+      : { ...input.source }
+  );
+  const workflow = Object.freeze({ ...input.workflow });
+  const run = Object.freeze({ ...input.run });
 
   return {
     async write(eventInput) {
       sequence += 1;
+      const step =
+        eventInput.step === undefined ? undefined : Object.freeze({ ...eventInput.step });
+      const retry =
+        eventInput.retry === undefined ? undefined : Object.freeze({ ...eventInput.retry });
+      const outcome =
+        eventInput.outcome === undefined ? undefined : Object.freeze({ ...eventInput.outcome });
       const event: NeutralAuditEvent = {
-        id: createAuditEventId(input.run.id, sequence),
+        id: createAuditEventId(run.id, sequence),
         type: eventInput.type,
         occurredAt: eventInput.occurredAt,
         actor,
         source,
-        workflow: input.workflow,
-        run: input.run,
-        ...(eventInput.step === undefined ? {} : { step: eventInput.step }),
-        ...(eventInput.retry === undefined ? {} : { retry: eventInput.retry }),
-        ...(eventInput.outcome === undefined ? {} : { outcome: eventInput.outcome })
+        workflow,
+        run,
+        ...(step === undefined ? {} : { step }),
+        ...(retry === undefined ? {} : { retry }),
+        ...(outcome === undefined ? {} : { outcome })
       };
 
       validateNeutralAuditEvent(event);
-      await appendAuditEvent(input.auditPath, event);
+      await appendAuditEvent(auditPath, event);
     }
   };
 };
@@ -122,6 +150,10 @@ const appendAuditEvent = async (auditPath: string, event: NeutralAuditEvent): Pr
 };
 
 const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
+  if (!NEUTRAL_AUDIT_EVENT_TYPES.has(event.type)) {
+    throw new Error("audit event type is invalid");
+  }
+
   requireNonEmptyString(event.id, "audit event id");
   requireIsoTimestamp(event.occurredAt, "audit event occurredAt");
   requireNonEmptyString(event.actor.id, "audit event actor.id");
@@ -156,7 +188,26 @@ const requireNonEmptyString = (value: string, label: string): void => {
 };
 
 const requireIsoTimestamp = (value: string, label: string): void => {
-  if (Number.isNaN(Date.parse(value))) {
+  if (!isStrictUtcMillisTimestamp(value)) {
     throw new Error(`${label} must be an ISO timestamp string`);
   }
+};
+
+const isStrictUtcMillisTimestamp = (value: string): boolean => {
+  const match = ISO_UTC_MILLIS_TIMESTAMP_PATTERN.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+
+  return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 };

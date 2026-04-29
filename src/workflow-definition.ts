@@ -5,6 +5,35 @@ const ACTION_TYPES = new Set(["local", "approval", "notification"]);
 const IDEMPOTENCY_KEY_SOURCES = new Set(["input", "workflow", "static"]);
 const BACKOFF_STRATEGIES = new Set(["none", "fixed", "exponential"]);
 const STABLE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const TRIGGER_ALLOWED_KEYS = new Set(["type", "cron", "path", "idempotencyKey"]);
+const MANUAL_TRIGGER_ALLOWED_KEYS = new Set(["type", "idempotencyKey"]);
+const SCHEDULE_TRIGGER_ALLOWED_KEYS = new Set(["type", "cron", "idempotencyKey"]);
+const WEBHOOK_TRIGGER_ALLOWED_KEYS = new Set(["type", "path", "idempotencyKey"]);
+const ACTION_ALLOWED_KEYS = new Set(["type", "name", "with"]);
+const RETRY_POLICY_ALLOWED_KEYS = new Set(["maxAttempts", "backoff"]);
+const RETRY_BACKOFF_ALLOWED_KEYS = new Set([
+  "strategy",
+  "delayMs",
+  "initialDelayMs",
+  "maxDelayMs"
+]);
+const RETRY_BACKOFF_NONE_ALLOWED_KEYS = new Set(["strategy"]);
+const RETRY_BACKOFF_FIXED_ALLOWED_KEYS = new Set(["strategy", "delayMs"]);
+const RETRY_BACKOFF_EXPONENTIAL_ALLOWED_KEYS = new Set([
+  "strategy",
+  "initialDelayMs",
+  "maxDelayMs"
+]);
+const IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set([
+  "source",
+  "field",
+  "required",
+  "template",
+  "value"
+]);
+const INPUT_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "field", "required"]);
+const WORKFLOW_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "template"]);
+const STATIC_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "value"]);
 
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
@@ -132,8 +161,18 @@ const validateTrigger = (
   }
 
   rejectEnsenLoopSpecificFields(value, "trigger", errors);
+  const triggerType = value.type;
+  if (triggerType === "manual") {
+    rejectUnknownKeys(value, MANUAL_TRIGGER_ALLOWED_KEYS, "trigger", errors);
+  } else if (triggerType === "schedule") {
+    rejectUnknownKeys(value, SCHEDULE_TRIGGER_ALLOWED_KEYS, "trigger", errors);
+  } else if (triggerType === "webhook") {
+    rejectUnknownKeys(value, WEBHOOK_TRIGGER_ALLOWED_KEYS, "trigger", errors);
+  } else {
+    rejectUnknownKeys(value, TRIGGER_ALLOWED_KEYS, "trigger", errors);
+  }
 
-  if (typeof value.type !== "string" || !TRIGGER_TYPES.has(value.type)) {
+  if (typeof triggerType !== "string" || !TRIGGER_TYPES.has(triggerType)) {
     errors.push({
       path: "trigger.type",
       message: "trigger.type must be manual, schedule, or webhook"
@@ -141,11 +180,11 @@ const validateTrigger = (
     return;
   }
 
-  if (value.type === "schedule") {
+  if (triggerType === "schedule") {
     requireNonEmptyString(value, "cron", "trigger.cron", errors);
   }
 
-  if (value.type === "webhook") {
+  if (triggerType === "webhook") {
     requireNonEmptyString(value, "path", "trigger.path", errors);
   }
 
@@ -252,6 +291,8 @@ const validateAction = (
     return;
   }
 
+  rejectUnknownKeys(value, ACTION_ALLOWED_KEYS, path, errors);
+
   if (typeof value.type !== "string" || !ACTION_TYPES.has(value.type)) {
     errors.push({
       path: `${path}.type`,
@@ -276,6 +317,8 @@ const validateRetryPolicy = (
     return;
   }
 
+  rejectUnknownKeys(value, RETRY_POLICY_ALLOWED_KEYS, path, errors);
+
   if (!isPositiveInteger(value.maxAttempts)) {
     errors.push({
       path: `${path}.maxAttempts`,
@@ -289,6 +332,21 @@ const validateRetryPolicy = (
   }
 
   const { strategy } = value.backoff;
+  if (strategy === "none") {
+    rejectUnknownKeys(value.backoff, RETRY_BACKOFF_NONE_ALLOWED_KEYS, `${path}.backoff`, errors);
+  } else if (strategy === "fixed") {
+    rejectUnknownKeys(value.backoff, RETRY_BACKOFF_FIXED_ALLOWED_KEYS, `${path}.backoff`, errors);
+  } else if (strategy === "exponential") {
+    rejectUnknownKeys(
+      value.backoff,
+      RETRY_BACKOFF_EXPONENTIAL_ALLOWED_KEYS,
+      `${path}.backoff`,
+      errors
+    );
+  } else {
+    rejectUnknownKeys(value.backoff, RETRY_BACKOFF_ALLOWED_KEYS, `${path}.backoff`, errors);
+  }
+
   if (typeof strategy !== "string" || !BACKOFF_STRATEGIES.has(strategy)) {
     errors.push({
       path: `${path}.backoff.strategy`,
@@ -331,9 +389,20 @@ const validateIdempotencyKey = (
     return;
   }
 
+  const idempotencyKeySource = value.source;
+  if (idempotencyKeySource === "input") {
+    rejectUnknownKeys(value, INPUT_IDEMPOTENCY_KEY_ALLOWED_KEYS, path, errors);
+  } else if (idempotencyKeySource === "workflow") {
+    rejectUnknownKeys(value, WORKFLOW_IDEMPOTENCY_KEY_ALLOWED_KEYS, path, errors);
+  } else if (idempotencyKeySource === "static") {
+    rejectUnknownKeys(value, STATIC_IDEMPOTENCY_KEY_ALLOWED_KEYS, path, errors);
+  } else {
+    rejectUnknownKeys(value, IDEMPOTENCY_KEY_ALLOWED_KEYS, path, errors);
+  }
+
   if (
-    typeof value.source !== "string" ||
-    !IDEMPOTENCY_KEY_SOURCES.has(value.source)
+    typeof idempotencyKeySource !== "string" ||
+    !IDEMPOTENCY_KEY_SOURCES.has(idempotencyKeySource)
   ) {
     errors.push({
       path: `${path}.source`,
@@ -342,7 +411,7 @@ const validateIdempotencyKey = (
     return;
   }
 
-  if (value.source === "input") {
+  if (idempotencyKeySource === "input") {
     requireNonEmptyString(value, "field", `${path}.field`, errors);
     if ("required" in value && typeof value.required !== "boolean") {
       errors.push({
@@ -352,11 +421,11 @@ const validateIdempotencyKey = (
     }
   }
 
-  if (value.source === "workflow") {
+  if (idempotencyKeySource === "workflow") {
     requireNonEmptyString(value, "template", `${path}.template`, errors);
   }
 
-  if (value.source === "static") {
+  if (idempotencyKeySource === "static") {
     requireNonEmptyString(value, "value", `${path}.value`, errors);
   }
 };
@@ -429,6 +498,22 @@ const rejectEnsenLoopSpecificFields = (
 ): void => {
   for (const key of ["ensenLoop", "ensenLoopField", "loopQueue", "executorConnector"]) {
     if (key in value) {
+      errors.push({
+        path: path ? `${path}.${key}` : `workflow.${key}`,
+        message: `${key} is outside the workflow definition schema boundary`
+      });
+    }
+  }
+};
+
+const rejectUnknownKeys = (
+  value: Record<string, unknown>,
+  allowedKeys: Set<string>,
+  path: string,
+  errors: WorkflowDefinitionValidationError[]
+): void => {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) {
       errors.push({
         path: path ? `${path}.${key}` : `workflow.${key}`,
         message: `${key} is outside the workflow definition schema boundary`

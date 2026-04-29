@@ -17,6 +17,10 @@ The schema includes:
 - idempotency key semantics for `input`, `workflow`, and `static` sources
 - free-form workflow and step metadata
 
+Schema-owned objects reject unknown fields so typos and connector-specific drift
+fail validation. Use `metadata` for workflow or step annotations and action
+`with` values for neutral action inputs; both remain free-form at this boundary.
+
 The schema does not include Ensen-loop-specific fields, run state transitions,
 persistence behavior, executor connector configuration, or real Slack, Teams,
 ERPNext, GitHub, or other connector behavior. Those concerns are deferred to

@@ -5,6 +5,9 @@
   "type": "module",
   "private": true,
   "license": "MIT",
+  "bin": {
+    "ensen-flow": "./dist/cli.js"
+  },
   "engines": {
     "node": ">=22"
   },

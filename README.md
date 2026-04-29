@@ -40,3 +40,17 @@ Workflow run state can be persisted locally with append-only JSONL records via
 The model records trigger context, idempotency metadata, step attempts, retry
 metadata, timestamps, and explicit terminal states while remaining independent
 from Ensen-loop and external connector contracts.
+
+## Local Sequential Runner
+
+The Phase 1 local runner can execute a validated workflow definition through a
+neutral in-process step handler and persist progress to the JSONL state layer.
+It is intentionally independent from Ensen-loop and external executor
+connectors.
+
+Programmatic callers can use `runWorkflow`. The built CLI can run the canonical
+manual fixture after `npm run build`:
+
+```sh
+node dist/cli.js run fixtures/workflow-definitions/simple-manual.valid.json <state-jsonl-path> '{"requestId":"manual-001"}'
+```

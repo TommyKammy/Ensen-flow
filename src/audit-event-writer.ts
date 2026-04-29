@@ -91,11 +91,15 @@ export const createLocalAuditEventWriter = (
       sequence += 1;
       const event: NeutralAuditEvent = {
         id: createAuditEventId(input.run.id, sequence),
+        type: eventInput.type,
+        occurredAt: eventInput.occurredAt,
         actor,
         source,
         workflow: input.workflow,
         run: input.run,
-        ...eventInput
+        ...(eventInput.step === undefined ? {} : { step: eventInput.step }),
+        ...(eventInput.retry === undefined ? {} : { retry: eventInput.retry }),
+        ...(eventInput.outcome === undefined ? {} : { outcome: eventInput.outcome })
       };
 
       validateNeutralAuditEvent(event);

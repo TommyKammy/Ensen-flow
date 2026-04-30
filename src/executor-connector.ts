@@ -53,6 +53,46 @@ export interface ExecutorSubmitRequest {
   input?: Record<string, unknown>;
   idempotencyKey?: string;
   policyDecision?: ExecutorPolicyDecisionPayload;
+  source?: EipRunRequestSourceRef;
+  requestedBy?: EipRunRequestActorRef;
+  workItem?: EipRunRequestWorkItem;
+  mode?: EipRunRequestMode;
+  target?: EipRunRequestTarget;
+  policyContext?: EipRunRequestPolicyContext;
+  dataClassification?: string;
+}
+
+export type EipRunRequestMode = "plan" | "apply" | "validate";
+
+export interface EipRunRequestSourceRef {
+  sourceId: string;
+  sourceType: string;
+  externalRef?: string;
+}
+
+export interface EipRunRequestActorRef {
+  actorId: string;
+  actorType: string;
+  displayName?: string;
+}
+
+export interface EipRunRequestWorkItem {
+  workItemId: string;
+  externalId: string;
+  title?: string;
+  url?: string;
+}
+
+export interface EipRunRequestTarget {
+  targetType: "repository" | "workspace" | "environment" | "manual";
+  targetId: string;
+  externalRef?: string;
+}
+
+export interface EipRunRequestPolicyContext {
+  policySetId?: string;
+  riskClasses?: string[];
+  requiresApproval?: boolean;
 }
 
 export interface ExecutorConnectorSubmitReceipt {

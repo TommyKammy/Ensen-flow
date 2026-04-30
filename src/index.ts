@@ -17,6 +17,10 @@ export {
 } from "./connector.js";
 
 export {
+  createEnsenLoopEipExecutorConnector
+} from "./ensen-loop-eip-executor-connector.js";
+
+export {
   createExecutorConnectorCapabilities,
   createUnsupportedExecutorConnectorOperationResult,
   mapExecutorPolicyDecisionToFlowControlState
@@ -54,6 +58,12 @@ export type {
 } from "./connector.js";
 
 export type {
+  CreateEnsenLoopEipExecutorConnectorInput,
+  EipRunRequestV1,
+  EnsenLoopEipExecutorTransport
+} from "./ensen-loop-eip-executor-connector.js";
+
+export type {
   ExecutorConnector,
   ExecutorConnectorCancelReceipt,
   ExecutorConnectorCancelRequest,
@@ -71,6 +81,12 @@ export type {
   ExecutorConnectorSubmitResult,
   ExecutorFlowControlState,
   ExecutorFlowControlStateName,
+  EipRunRequestActorRef,
+  EipRunRequestMode,
+  EipRunRequestPolicyContext,
+  EipRunRequestSourceRef,
+  EipRunRequestTarget,
+  EipRunRequestWorkItem,
   ExecutorPolicyDecision,
   ExecutorPolicyDecisionPayload,
   ExecutorSubmitRequest

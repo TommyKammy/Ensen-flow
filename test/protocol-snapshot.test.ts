@@ -88,23 +88,48 @@ describe("Ensen-protocol snapshot boundary", () => {
 
   it("includes valid and invalid fixtures for each Phase 2 EIP surface", async () => {
     for (const fixtureFamily of expectedFixtureFamilies) {
-      await expect(
-        listJsonFixtures(join("fixtures", fixtureFamily, "v1", "valid"))
-      ).resolves.not.toHaveLength(0);
-      await expect(
-        listJsonFixtures(join("fixtures", fixtureFamily, "v1", "invalid"))
-      ).resolves.not.toHaveLength(0);
+      const validFixturePath = join("fixtures", fixtureFamily, "v1", "valid");
+      const invalidFixturePath = join("fixtures", fixtureFamily, "v1", "invalid");
+      const validFixtures = await listJsonFixtures(validFixturePath);
+      const invalidFixtures = await listJsonFixtures(invalidFixturePath);
+
+      expect(validFixtures).not.toHaveLength(0);
+      expect(invalidFixtures).not.toHaveLength(0);
+
+      for (const fixtureName of validFixtures) {
+        await expect(readJson(join(validFixturePath, fixtureName))).resolves.toEqual(
+          expect.any(Object)
+        );
+      }
+
+      for (const fixtureName of invalidFixtures) {
+        await expect(readJson(join(invalidFixturePath, fixtureName))).resolves.toEqual(
+          expect.any(Object)
+        );
+      }
     }
   });
 
   it("exposes a fail-closed EIP version boundary without a runtime protocol dependency", async () => {
-    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as Record<
+      string,
+      unknown
+    >;
 
-    expect(packageJson.dependencies ?? {}).not.toHaveProperty("ensen-protocol");
-    expect(packageJson.devDependencies ?? {}).not.toHaveProperty("ensen-protocol");
+    for (const dependencyKey of [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+      "bundledDependencies",
+      "bundleDependencies",
+      "peerDependenciesMeta",
+      "overrides"
+    ]) {
+      const dependencyBucket = packageJson[dependencyKey];
+      expect(JSON.stringify(dependencyBucket ?? {})).not.toContain("ensen-protocol");
+    }
+
     expect(eipVersionBoundary).toEqual({
       sourceRepository: "TommyKammy/Ensen-protocol",
       snapshotReleaseTag: "v0.1.0",

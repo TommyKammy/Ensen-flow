@@ -213,4 +213,18 @@ describe("workflow definition schema", () => {
       }
     ]);
   });
+
+  it("fails closed when an unsupported EIP protocol version is declared", () => {
+    const workflow = readMutableWorkflowFixture();
+    workflow.protocolVersion = "1.0.0";
+
+    const result = validateWorkflowDefinition(workflow);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual({
+      path: "workflow.protocolVersion",
+      message:
+        "unsupported EIP protocolVersion \"1.0.0\"; fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version"
+    });
+  });
 });

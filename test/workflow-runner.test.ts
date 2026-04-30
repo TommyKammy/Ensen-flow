@@ -158,6 +158,34 @@ describe("sequential workflow runner", () => {
     await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("rejects unsupported EIP protocol versions before writing state or audit records", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    (definition as WorkflowDefinition & { protocolVersion: string }).protocolVersion = "1.0.0";
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let stepHandlerCalled = false;
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-unsupported-eip"
+        },
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow(
+      "unsupported EIP protocolVersion \"1.0.0\"; fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version"
+    );
+
+    expect(stepHandlerCalled).toBe(false);
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("runs a valid manual workflow without trigger idempotency metadata", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     delete definition.trigger.idempotencyKey;

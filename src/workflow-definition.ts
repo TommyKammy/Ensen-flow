@@ -1,3 +1,8 @@
+import {
+  eipVersionBoundary,
+  isSupportedEipProtocolVersion
+} from "./eip-version.js";
+
 const WORKFLOW_SCHEMA_VERSION = "flow.workflow.v1";
 
 const TRIGGER_TYPES = new Set(["manual", "schedule", "webhook"]);
@@ -153,6 +158,7 @@ export const validateWorkflowDefinition = (
   }
 
   rejectEnsenLoopSpecificFields(value, "", errors);
+  rejectUnsupportedEipProtocolVersion(value, errors);
   rejectUnknownKeys(value, WORKFLOW_ALLOWED_KEYS, "", errors);
   requireLiteral(value, "schemaVersion", WORKFLOW_SCHEMA_VERSION, errors);
   requireStableId(value, "id", "workflow.id", errors);
@@ -532,6 +538,26 @@ const rejectEnsenLoopSpecificFields = (
         message: `${key} is outside the workflow definition schema boundary`
       });
     }
+  }
+};
+
+const rejectUnsupportedEipProtocolVersion = (
+  value: Record<string, unknown>,
+  errors: WorkflowDefinitionValidationError[]
+): void => {
+  if (!("protocolVersion" in value)) {
+    return;
+  }
+
+  const protocolVersion = value.protocolVersion;
+  if (
+    typeof protocolVersion !== "string" ||
+    !isSupportedEipProtocolVersion(protocolVersion)
+  ) {
+    errors.push({
+      path: "workflow.protocolVersion",
+      message: `unsupported EIP protocolVersion ${JSON.stringify(protocolVersion)}; ${eipVersionBoundary.unsupportedMajorVersionPolicy}`
+    });
   }
 };
 

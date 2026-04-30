@@ -12,6 +12,10 @@ import type {
   WorkflowRunState
 } from "./workflow-run-state.js";
 import {
+  eipVersionBoundary,
+  isSupportedEipProtocolVersion
+} from "./eip-version.js";
+import {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
@@ -43,6 +47,8 @@ export interface WorkflowStepHandlerInput {
 export type WorkflowStepHandler = (input: WorkflowStepHandlerInput) => Promise<void> | void;
 
 export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunState> => {
+  assertSupportedWorkflowEipProtocolVersion(input.definition);
+
   const validation = validateWorkflowDefinition(input.definition);
   if (!validation.valid) {
     const details = validation.errors
@@ -230,6 +236,8 @@ export const loadWorkflowDefinitionFile = async (
   definitionPath: string
 ): Promise<WorkflowDefinition> => {
   const parsed = JSON.parse(await readFile(definitionPath, "utf8")) as unknown;
+  assertSupportedWorkflowEipProtocolVersion(parsed);
+
   const validation = validateWorkflowDefinition(parsed);
   if (!validation.valid) {
     const details = validation.errors
@@ -239,6 +247,22 @@ export const loadWorkflowDefinitionFile = async (
   }
 
   return parsed as WorkflowDefinition;
+};
+
+const assertSupportedWorkflowEipProtocolVersion = (definition: unknown): void => {
+  if (!isRecord(definition) || !("protocolVersion" in definition)) {
+    return;
+  }
+
+  const protocolVersion = definition.protocolVersion;
+  if (
+    typeof protocolVersion !== "string" ||
+    !isSupportedEipProtocolVersion(protocolVersion)
+  ) {
+    throw new Error(
+      `unsupported EIP protocolVersion ${JSON.stringify(protocolVersion)}; ${eipVersionBoundary.unsupportedMajorVersionPolicy}`
+    );
+  }
 };
 
 const defaultWorkflowStepHandler: WorkflowStepHandler = ({ step }) => {
@@ -422,3 +446,6 @@ const writeStepAuditEvent = async (
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

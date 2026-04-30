@@ -11,6 +11,13 @@ export const baselineInfo: BaselineInfo = {
 };
 
 export {
+  eipVersionBoundary,
+  isSupportedEipProtocolVersion
+} from "./eip-version.js";
+
+export type { EipVersionBoundary } from "./eip-version.js";
+
+export {
   appendWorkflowRunEvent,
   createWorkflowRun,
   readWorkflowRunState

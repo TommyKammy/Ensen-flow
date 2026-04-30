@@ -1,0 +1,42 @@
+{
+  "source": {
+    "repository": "TommyKammy/Ensen-protocol",
+    "releaseTag": "v0.1.0",
+    "protocolVersion": "0.1.0"
+  },
+  "policy": {
+    "updatePolicy": "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
+    "runtimeDependency": false,
+    "localCorrections": [
+      {
+        "path": "fixtures/evidence-bundle-ref/v1/invalid/raw-secret-uri.json",
+        "reason": "Use a scanner-safe invalid URI placeholder."
+      },
+      {
+        "path": "fixtures/run-request/v1/invalid/raw-secret.json",
+        "reason": "Keep the invalid fixture deterministically invalid under ExtensionMap rules."
+      },
+      {
+        "path": "schemas/eip.run-result.v1.schema.json",
+        "reason": "Require VerificationSummary.status for unambiguous verification payloads."
+      }
+    ]
+  },
+  "includes": {
+    "schemas": [
+      "schemas/eip.evidence-bundle-ref.v1.schema.json",
+      "schemas/eip.run-request.v1.schema.json",
+      "schemas/eip.run-result.v1.schema.json",
+      "schemas/eip.run-status.v1.schema.json"
+    ],
+    "supportSchemas": [
+      "schemas/eip.common.v1.schema.json"
+    ],
+    "fixtureFamilies": [
+      "evidence-bundle-ref",
+      "run-request",
+      "run-result",
+      "run-status"
+    ]
+  }
+}

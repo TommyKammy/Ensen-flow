@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eip.ensen.dev/schemas/eip.common.v1.schema.json",
+  "title": "EIP Common v1 Fixture Envelope",
+  "description": "Common schema conventions and reusable v1 type definitions for EIP artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "correlationId",
+    "createdAt",
+    "actor",
+    "source",
+    "workItem",
+    "changeRequest",
+    "evidenceBundle",
+    "classification"
+  ],
+  "properties": {
+    "artifactId": {
+      "$ref": "#/$defs/PrefixedId"
+    },
+    "correlationId": {
+      "$ref": "#/$defs/CorrelationId"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/IsoDateTimeUtc"
+    },
+    "actor": {
+      "$ref": "#/$defs/ActorRef"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceRef"
+    },
+    "workItem": {
+      "$ref": "#/$defs/WorkItemRef"
+    },
+    "changeRequest": {
+      "$ref": "#/$defs/ChangeRequestRef"
+    },
+    "evidenceBundle": {
+      "$ref": "#/$defs/EvidenceBundleRef"
+    },
+    "classification": {
+      "$ref": "#/$defs/DataClassification"
+    },
+    "error": {
+      "$ref": "#/$defs/ErrorInfo"
+    },
+    "extensions": {
+      "$ref": "#/$defs/ExtensionMap"
+    }
+  },
+  "$defs": {
+    "PrefixedId": {
+      "type": "string",
+      "description": "Stable protocol identifier with a registered 2-8 character lowercase semantic prefix, underscore separator, and opaque suffix.",
+      "pattern": "^(?:actor|artifact|corr|cr|evb|evt|flowstep|policy|pr|repo|req|run|source|sts|workitem)_[A-Za-z0-9][A-Za-z0-9._~-]{5,127}$"
+    },
+    "CorrelationId": {
+      "type": "string",
+      "description": "Opaque idempotency and tracing identifier shared by related protocol artifacts.",
+      "pattern": "^corr_[A-Za-z0-9][A-Za-z0-9._~-]{11,127}$"
+    },
+    "IsoDateTimeUtc": {
+      "type": "string",
+      "description": "UTC timestamp using ISO 8601 extended format with a literal Z offset.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+    },
+    "ActorRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "actorType"],
+      "properties": {
+        "actorId": {
+          "$ref": "#/$defs/PrefixedId"
+        },
+        "actorType": {
+          "type": "string",
+          "enum": ["human", "workflow", "system", "api_client", "connector", "executor", "agent"]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "sourceType"],
+      "properties": {
+        "sourceId": {
+          "$ref": "#/$defs/PrefixedId"
+        },
+        "sourceType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "externalRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "WorkItemRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItemId"],
+      "properties": {
+        "workItemId": {
+          "$ref": "#/$defs/PrefixedId"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "ChangeRequestRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeRequestId"],
+      "properties": {
+        "changeRequestId": {
+          "$ref": "#/$defs/PrefixedId"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "open", "accepted", "rejected", "superseded"]
+        }
+      }
+    },
+    "EvidenceBundleRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceBundleId"],
+      "properties": {
+        "evidenceBundleId": {
+          "$ref": "#/$defs/PrefixedId"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "ErrorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "ExtensionMap": {
+      "type": "object",
+      "description": "Vendor or artifact-specific extension values. Extension keys must use the x- prefix.",
+      "propertyNames": {
+        "pattern": "^x-.+$"
+      },
+      "additionalProperties": true
+    },
+    "DataClassification": {
+      "type": "string",
+      "description": "Classification label for fixture and production data handling.",
+      "enum": ["public", "internal", "confidential", "restricted"]
+    }
+  }
+}

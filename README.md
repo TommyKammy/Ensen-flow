@@ -35,6 +35,9 @@ authority, and no premature compliance claims.
 
 - `docs/mission.md`: Ensen-flow mission and development charter short form.
 - `docs/workflow-definition.md`: Phase 1 workflow definition schema boundary.
+- `docs/x-gate2-loop-flow-smoke-runbook.md`: local X-Gate 2 loop-flow smoke
+  runbook, expected artifacts, failure classification, and non-production
+  boundaries.
 
 ## Workflow Definition Schema
 

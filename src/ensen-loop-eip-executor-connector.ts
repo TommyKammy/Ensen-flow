@@ -142,6 +142,12 @@ interface FakeEnsenLoopEipRecord {
   statusIndex: number;
 }
 
+interface JsonCliInvocationResult {
+  payload: unknown;
+  exitCode: number | null;
+  stderr: string;
+}
+
 export const createCliEnsenLoopEipExecutorTransport = (
   input: CreateCliEnsenLoopEipExecutorTransportInput
 ): EnsenLoopEipExecutorTransport => {
@@ -417,14 +423,24 @@ const invokeEnsenLoopXGate2SmokeCli = async (
 
   try {
     await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
-    const aggregate = await invokeJsonCli({
+    const cliResult = await invokeJsonCli({
       input: {
         ...input,
         args: [...(input.args ?? []), requestPath]
       },
       operation: "submit",
-      allowNonZeroJsonStdout: true
-    });
+      allowNonZeroJsonStdout: true,
+      returnResultMetadata: true
+    }) as JsonCliInvocationResult;
+    const aggregate = cliResult.payload;
+    const invalidAggregateFailureClass =
+      cliResult.exitCode === 0 ? "protocol-gap" : "loop-gap";
+    const invalidAggregateEvidence = {
+      ...(cliResult.exitCode === null || cliResult.exitCode === 0
+        ? {}
+        : { exitCode: cliResult.exitCode }),
+      ...(cliResult.stderr.length === 0 ? {} : { stderr: cliResult.stderr })
+    };
     const version = requireSchemaVersion(
       aggregate,
       "ensen-loop.x-gate2-smoke.v1",
@@ -434,16 +450,18 @@ const invokeEnsenLoopXGate2SmokeCli = async (
     if (version !== undefined) {
       throw new EnsenLoopCliTransportError({
         message: version.message,
-        failureClass: "protocol-gap",
-        operation: "submit"
+        failureClass: invalidAggregateFailureClass,
+        operation: "submit",
+        ...invalidAggregateEvidence
       });
     }
 
     if (!isRecord(aggregate)) {
       throw new EnsenLoopCliTransportError({
         message: "Ensen-loop X-Gate 2 smoke aggregate must be an object",
-        failureClass: "protocol-gap",
-        operation: "submit"
+        failureClass: invalidAggregateFailureClass,
+        operation: "submit",
+        ...invalidAggregateEvidence
       });
     }
 
@@ -452,8 +470,9 @@ const invokeEnsenLoopXGate2SmokeCli = async (
     if (aggregateValidation !== undefined) {
       throw new EnsenLoopCliTransportError({
         message: aggregateValidation.message,
-        failureClass: "protocol-gap",
-        operation: "submit"
+        failureClass: invalidAggregateFailureClass,
+        operation: "submit",
+        ...invalidAggregateEvidence
       });
     }
 
@@ -501,6 +520,7 @@ const invokeJsonCli = async (run: {
   operation: EnsenLoopCliOperation;
   stdin?: string;
   allowNonZeroJsonStdout?: boolean;
+  returnResultMetadata?: boolean;
 }): Promise<unknown> => {
   const { input, operation } = run;
   const child = spawn(input.command, input.args ?? [], {
@@ -612,7 +632,15 @@ const invokeJsonCli = async (run: {
   }
 
   try {
-    return JSON.parse(stdout) as unknown;
+    const payload = JSON.parse(stdout) as unknown;
+    if (run.returnResultMetadata === true) {
+      return {
+        payload,
+        exitCode: code,
+        stderr
+      } satisfies JsonCliInvocationResult;
+    }
+    return payload;
   } catch (error) {
     throw new EnsenLoopCliTransportError({
       message:

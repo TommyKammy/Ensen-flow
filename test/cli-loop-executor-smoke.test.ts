@@ -223,10 +223,20 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       name: "loop gap for non-zero CLI exit",
       scriptBody: "process.stderr.write('dry-run CLI failed'); process.exitCode = 3;",
       expectedClass: "loop-gap"
+    },
+    {
+      name: "loop gap for non-zero invalid smoke JSON",
+      scriptBody:
+        "process.stdout.write(JSON.stringify({ error: 'loop failed before aggregate' })); process.stderr.write('dry-run CLI failed'); process.exitCode = 3;",
+      expectedClass: "loop-gap",
+      expectedExitCode: 3,
+      expectedStderr: "dry-run CLI failed"
     }
   ])("classifies CLI smoke failures as $name", async ({
     scriptBody,
-    expectedClass
+    expectedClass,
+    expectedExitCode,
+    expectedStderr
   }) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-failure-"));
     const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
@@ -252,7 +262,9 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       await expect(transport.submitRunRequest(createSmokeRunRequest()))
         .rejects.toMatchObject({
           failureClass: expectedClass,
-          operation: "submit"
+          operation: "submit",
+          ...(expectedExitCode === undefined ? {} : { exitCode: expectedExitCode }),
+          ...(expectedStderr === undefined ? {} : { stderr: expectedStderr })
         });
     } finally {
       await rm(tempRoot, { recursive: true, force: true });

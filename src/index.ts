@@ -17,6 +17,8 @@ export {
 } from "./connector.js";
 
 export {
+  EnsenLoopCliTransportError,
+  createCliEnsenLoopEipExecutorTransport,
   createEnsenLoopEipExecutorConnector,
   createFakeEnsenLoopEipExecutorTransport
 } from "./ensen-loop-eip-executor-connector.js";
@@ -59,9 +61,12 @@ export type {
 } from "./connector.js";
 
 export type {
+  CreateCliEnsenLoopEipExecutorTransportInput,
   CreateEnsenLoopEipExecutorConnectorInput,
   CreateFakeEnsenLoopEipExecutorTransportInput,
   EipRunRequestV1,
+  EnsenLoopCliFailureClass,
+  EnsenLoopCliOperation,
   EnsenLoopEipExecutorTransport,
   FakeEnsenLoopEipExecutorTransport,
   FakeEnsenLoopEipPayload,

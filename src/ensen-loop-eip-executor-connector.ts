@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+
 import {
   createExecutorConnectorCapabilities,
   createUnsupportedExecutorConnectorOperationResult,
@@ -62,6 +64,42 @@ export interface EnsenLoopEipExecutorTransport {
     | { requestId?: string; cancelled?: boolean; observedAt?: string };
 }
 
+export type EnsenLoopCliFailureClass = "protocol-gap" | "loop-gap" | "flow-gap";
+
+export class EnsenLoopCliTransportError extends Error {
+  readonly failureClass: EnsenLoopCliFailureClass;
+  readonly operation: EnsenLoopCliOperation;
+  readonly exitCode?: number;
+  readonly stderr?: string;
+
+  constructor(input: {
+    message: string;
+    failureClass: EnsenLoopCliFailureClass;
+    operation: EnsenLoopCliOperation;
+    exitCode?: number;
+    stderr?: string;
+  }) {
+    super(input.message);
+    this.name = "EnsenLoopCliTransportError";
+    this.failureClass = input.failureClass;
+    this.operation = input.operation;
+    this.exitCode = input.exitCode;
+    this.stderr = input.stderr;
+  }
+}
+
+export type EnsenLoopCliOperation = "submit" | "status" | "result" | "evidence";
+
+const cliTerminationGraceMs = 1000;
+
+export interface CreateCliEnsenLoopEipExecutorTransportInput {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}
+
 export interface CreateEnsenLoopEipExecutorConnectorInput {
   connectorId?: string;
   transport: EnsenLoopEipExecutorTransport;
@@ -101,6 +139,35 @@ interface FakeEnsenLoopEipRecord {
   statusIndex: number;
 }
 
+export const createCliEnsenLoopEipExecutorTransport = (
+  input: CreateCliEnsenLoopEipExecutorTransportInput
+): EnsenLoopEipExecutorTransport => ({
+  submitRunRequest(request: EipRunRequestV1) {
+    return invokeEnsenLoopCli(input, {
+      operation: "submit",
+      request
+    }) as Promise<{ requestId?: string; acceptedAt?: string; evidence?: Record<string, unknown> }>;
+  },
+  getRunStatusSnapshot(request: { requestId: string }) {
+    return invokeEnsenLoopCli(input, {
+      operation: "status",
+      requestId: request.requestId
+    });
+  },
+  getRunResult(request: { requestId: string }) {
+    return invokeEnsenLoopCli(input, {
+      operation: "result",
+      requestId: request.requestId
+    });
+  },
+  getEvidenceBundleRef(request: { requestId: string }) {
+    return invokeEnsenLoopCli(input, {
+      operation: "evidence",
+      requestId: request.requestId
+    });
+  }
+});
+
 export const createEnsenLoopEipExecutorConnector = (
   input: CreateEnsenLoopEipExecutorConnectorInput
 ): ExecutorConnector => {
@@ -132,7 +199,8 @@ export const createEnsenLoopEipExecutorConnector = (
           connectorId,
           "submit",
           payloadValidation.message,
-          payloadValidation.reason
+          payloadValidation.reason,
+          "flow-gap"
         );
       }
 
@@ -305,6 +373,130 @@ export const createEnsenLoopEipExecutorConnector = (
       };
     }
   };
+};
+
+const invokeEnsenLoopCli = async (
+  input: CreateCliEnsenLoopEipExecutorTransportInput,
+  envelope: {
+    operation: EnsenLoopCliOperation;
+    request?: EipRunRequestV1;
+    requestId?: string;
+  }
+): Promise<unknown> => {
+  const operation = envelope.operation;
+  const child = spawn(input.command, input.args ?? [], {
+    cwd: input.cwd,
+    env: input.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: false
+  });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let timeout: NodeJS.Timeout | undefined;
+  let escalationTimeout: NodeJS.Timeout | undefined;
+
+  type CompletionResult = {
+    type: "completion";
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  };
+  type TimeoutResult = { type: "timeout" };
+  type CliResult = CompletionResult | TimeoutResult;
+
+  const completion = new Promise<CliResult>(
+    (resolve, reject) => {
+      child.once("error", (error) => {
+        reject(
+          new EnsenLoopCliTransportError({
+            message: `failed to start Ensen-loop CLI transport: ${error.message}`,
+            failureClass: "flow-gap",
+            operation
+          })
+        );
+      });
+      child.once("close", (code, signal) => {
+        resolve({ type: "completion", code, signal });
+      });
+    }
+  );
+
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdoutChunks.push(chunk);
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderrChunks.push(chunk);
+  });
+
+  const timeoutPromise =
+    input.timeoutMs === undefined
+      ? undefined
+      : new Promise<CliResult>((resolve) => {
+          timeout = setTimeout(() => {
+            child.kill("SIGTERM");
+            escalationTimeout = setTimeout(() => {
+              if (child.exitCode === null && child.signalCode === null) {
+                child.kill("SIGKILL");
+              }
+              resolve({ type: "timeout" });
+            }, cliTerminationGraceMs);
+          }, input.timeoutMs);
+        });
+
+  child.stdin.end(`${JSON.stringify(envelope)}\n`);
+
+  const result = await (timeoutPromise === undefined
+    ? completion
+    : Promise.race([completion, timeoutPromise])).finally(() => {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+    if (escalationTimeout !== undefined) {
+      clearTimeout(escalationTimeout);
+    }
+  });
+  const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+
+  if (result.type === "timeout") {
+    throw new EnsenLoopCliTransportError({
+      message: `Ensen-loop CLI transport timed out during ${operation}`,
+      failureClass: "loop-gap",
+      operation,
+      stderr
+    });
+  }
+
+  const { code, signal } = result;
+
+  if (code !== 0) {
+    throw new EnsenLoopCliTransportError({
+      message: `Ensen-loop CLI transport failed during ${operation} with exit code ${code ?? signal ?? "unknown"}`,
+      failureClass: "loop-gap",
+      operation,
+      ...(code === null ? {} : { exitCode: code }),
+      ...(stderr.length === 0 ? {} : { stderr })
+    });
+  }
+
+  const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
+  if (stdout.length === 0) {
+    throw new EnsenLoopCliTransportError({
+      message: `Ensen-loop CLI transport returned empty stdout during ${operation}`,
+      failureClass: "protocol-gap",
+      operation,
+      ...(stderr.length === 0 ? {} : { stderr })
+    });
+  }
+
+  try {
+    return JSON.parse(stdout) as unknown;
+  } catch (error) {
+    throw new EnsenLoopCliTransportError({
+      message: `Ensen-loop CLI transport returned non-JSON stdout during ${operation}`,
+      failureClass: "protocol-gap",
+      operation,
+      ...(stderr.length === 0 ? {} : { stderr })
+    });
+  }
 };
 
 export const createFakeEnsenLoopEipExecutorTransport = (
@@ -1215,7 +1407,8 @@ const invalidRequest = <TValue>(
   connectorId: string,
   operation: "submit" | "status" | "cancel" | "fetchEvidence",
   message: string,
-  reason?: string
+  reason?: string,
+  failureClass: EnsenLoopCliFailureClass = "protocol-gap"
 ): ConnectorResult<TValue> => ({
   ok: false,
   connectorId,
@@ -1224,7 +1417,8 @@ const invalidRequest = <TValue>(
     code: "invalid-request",
     message,
     retryable: false,
-    ...(reason === undefined ? {} : { reason })
+    ...(reason === undefined ? {} : { reason }),
+    failureClass
   } satisfies ConnectorErrorBody
 });
 

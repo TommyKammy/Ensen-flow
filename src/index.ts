@@ -20,7 +20,8 @@ export {
   EnsenLoopCliTransportError,
   createCliEnsenLoopEipExecutorTransport,
   createEnsenLoopEipExecutorConnector,
-  createFakeEnsenLoopEipExecutorTransport
+  createFakeEnsenLoopEipExecutorTransport,
+  createPerOperationCliEnsenLoopEipExecutorTransport
 } from "./ensen-loop-eip-executor-connector.js";
 
 export {

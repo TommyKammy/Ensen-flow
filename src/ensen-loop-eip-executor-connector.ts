@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   createExecutorConnectorCapabilities,
@@ -141,27 +144,57 @@ interface FakeEnsenLoopEipRecord {
 
 export const createCliEnsenLoopEipExecutorTransport = (
   input: CreateCliEnsenLoopEipExecutorTransportInput
+): EnsenLoopEipExecutorTransport => {
+  const smokeAggregates = new Map<string, EnsenLoopXGate2SmokeAggregateV1>();
+
+  return {
+    async submitRunRequest(request: EipRunRequestV1) {
+      const aggregate = await invokeEnsenLoopXGate2SmokeCli(input, request);
+      smokeAggregates.set(request.id, aggregate);
+
+      return {
+        requestId: request.id,
+        acceptedAt: aggregate.statusSnapshot.observedAt
+      };
+    },
+    getRunStatusSnapshot(request: { requestId: string }) {
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "status").statusSnapshot;
+    },
+    getRunResult(request: { requestId: string }) {
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "result").runResult;
+    },
+    getEvidenceBundleRef(request: { requestId: string }) {
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "evidence").evidenceBundleRef;
+    }
+  };
+};
+
+// Lower-level helper for CLIs that explicitly support Flow's per-operation stdin envelope.
+// The real Ensen-loop X-Gate 2 smoke command is a one-shot aggregate stdout contract;
+// use createCliEnsenLoopEipExecutorTransport for that boundary.
+export const createPerOperationCliEnsenLoopEipExecutorTransport = (
+  input: CreateCliEnsenLoopEipExecutorTransportInput
 ): EnsenLoopEipExecutorTransport => ({
   submitRunRequest(request: EipRunRequestV1) {
-    return invokeEnsenLoopCli(input, {
+    return invokePerOperationEnsenLoopCli(input, {
       operation: "submit",
       request
     }) as Promise<{ requestId?: string; acceptedAt?: string; evidence?: Record<string, unknown> }>;
   },
   getRunStatusSnapshot(request: { requestId: string }) {
-    return invokeEnsenLoopCli(input, {
+    return invokePerOperationEnsenLoopCli(input, {
       operation: "status",
       requestId: request.requestId
     });
   },
   getRunResult(request: { requestId: string }) {
-    return invokeEnsenLoopCli(input, {
+    return invokePerOperationEnsenLoopCli(input, {
       operation: "result",
       requestId: request.requestId
     });
   },
   getEvidenceBundleRef(request: { requestId: string }) {
-    return invokeEnsenLoopCli(input, {
+    return invokePerOperationEnsenLoopCli(input, {
       operation: "evidence",
       requestId: request.requestId
     });
@@ -375,7 +408,79 @@ export const createEnsenLoopEipExecutorConnector = (
   };
 };
 
-const invokeEnsenLoopCli = async (
+const invokeEnsenLoopXGate2SmokeCli = async (
+  input: CreateCliEnsenLoopEipExecutorTransportInput,
+  request: EipRunRequestV1
+): Promise<EnsenLoopXGate2SmokeAggregateV1> => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-x-gate2-smoke-"));
+  const requestPath = join(tempRoot, "run-request.json");
+
+  try {
+    await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
+    const aggregate = await invokeJsonCli({
+      input: {
+        ...input,
+        args: [...(input.args ?? []), requestPath]
+      },
+      operation: "submit"
+    });
+    const version = requireSchemaVersion(
+      aggregate,
+      "ensen-loop.x-gate2-smoke.v1",
+      "XGate2SmokeAggregate"
+    );
+
+    if (version !== undefined) {
+      throw new EnsenLoopCliTransportError({
+        message: version.message,
+        failureClass: "protocol-gap",
+        operation: "submit"
+      });
+    }
+
+    if (!isRecord(aggregate)) {
+      throw new EnsenLoopCliTransportError({
+        message: "Ensen-loop X-Gate 2 smoke aggregate must be an object",
+        failureClass: "protocol-gap",
+        operation: "submit"
+      });
+    }
+
+    const aggregateValidation = validateXGate2SmokeAggregate(aggregate, request.id);
+
+    if (aggregateValidation !== undefined) {
+      throw new EnsenLoopCliTransportError({
+        message: aggregateValidation.message,
+        failureClass: "protocol-gap",
+        operation: "submit"
+      });
+    }
+
+    return aggregate as unknown as EnsenLoopXGate2SmokeAggregateV1;
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+};
+
+const requireSmokeAggregate = (
+  smokeAggregates: Map<string, EnsenLoopXGate2SmokeAggregateV1>,
+  requestId: string,
+  operation: EnsenLoopCliOperation
+): EnsenLoopXGate2SmokeAggregateV1 => {
+  const aggregate = smokeAggregates.get(requestId);
+
+  if (aggregate === undefined) {
+    throw new EnsenLoopCliTransportError({
+      message: `Ensen-loop X-Gate 2 smoke aggregate is unavailable for request ${requestId}`,
+      failureClass: "flow-gap",
+      operation
+    });
+  }
+
+  return aggregate;
+};
+
+const invokePerOperationEnsenLoopCli = async (
   input: CreateCliEnsenLoopEipExecutorTransportInput,
   envelope: {
     operation: EnsenLoopCliOperation;
@@ -383,7 +488,19 @@ const invokeEnsenLoopCli = async (
     requestId?: string;
   }
 ): Promise<unknown> => {
-  const operation = envelope.operation;
+  return invokeJsonCli({
+    input,
+    operation: envelope.operation,
+    stdin: `${JSON.stringify(envelope)}\n`
+  });
+};
+
+const invokeJsonCli = async (run: {
+  input: CreateCliEnsenLoopEipExecutorTransportInput;
+  operation: EnsenLoopCliOperation;
+  stdin?: string;
+}): Promise<unknown> => {
+  const { input, operation } = run;
   const child = spawn(input.command, input.args ?? [], {
     cwd: input.cwd,
     env: input.env,
@@ -442,7 +559,7 @@ const invokeEnsenLoopCli = async (
           }, input.timeoutMs);
         });
 
-  child.stdin.end(`${JSON.stringify(envelope)}\n`);
+  child.stdin.end(run.stdin ?? "");
 
   const result = await (timeoutPromise === undefined
     ? completion
@@ -668,6 +785,13 @@ interface EipRunResultV1 {
   metrics?: Record<string, unknown>;
 }
 
+interface EnsenLoopXGate2SmokeAggregateV1 {
+  schemaVersion: "ensen-loop.x-gate2-smoke.v1";
+  statusSnapshot: EipRunStatusSnapshotV1;
+  runResult: EipRunResultV1;
+  evidenceBundleRef?: Record<string, unknown>;
+}
+
 const createRunRequestPayload = (
   request: ExecutorSubmitRequest,
   createdAt: string
@@ -816,6 +940,76 @@ const validateRunStatusSnapshot = (
 
   if (value.progress !== undefined && !isRecord(value.progress)) {
     return failClosedReason("EIP RunStatusSnapshot progress must be an object");
+  }
+
+  return undefined;
+};
+
+const validateXGate2SmokeAggregate = (
+  value: Record<string, unknown>,
+  expectedRequestId: string
+): { message: string; reason: string } | undefined => {
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "statusSnapshot",
+    "runResult",
+    "evidenceBundleRef"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP XGate2SmokeAggregate has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isRecord(value.statusSnapshot)) {
+    return failClosedReason("EIP XGate2SmokeAggregate statusSnapshot must be an object");
+  }
+
+  if (!isRecord(value.runResult)) {
+    return failClosedReason("EIP XGate2SmokeAggregate runResult must be an object");
+  }
+
+  if (value.evidenceBundleRef !== undefined && !isRecord(value.evidenceBundleRef)) {
+    return failClosedReason("EIP XGate2SmokeAggregate evidenceBundleRef must be an object");
+  }
+
+  const statusVersion = requireSchemaVersion(
+    value.statusSnapshot,
+    "eip.run-status.v1",
+    "RunStatusSnapshot"
+  );
+  if (statusVersion !== undefined) {
+    return statusVersion;
+  }
+
+  const statusValidation = validateRunStatusSnapshot(value.statusSnapshot, expectedRequestId);
+  if (statusValidation !== undefined) {
+    return statusValidation;
+  }
+
+  const resultVersion = requireSchemaVersion(value.runResult, "eip.run-result.v1", "RunResult");
+  if (resultVersion !== undefined) {
+    return resultVersion;
+  }
+
+  const resultValidation = validateRunResult(value.runResult, expectedRequestId);
+  if (resultValidation !== undefined) {
+    return resultValidation;
+  }
+
+  if (value.evidenceBundleRef !== undefined) {
+    const evidenceVersion = requireSchemaVersion(
+      value.evidenceBundleRef,
+      "eip.evidence-bundle-ref.v1",
+      "EvidenceBundleRef"
+    );
+    if (evidenceVersion !== undefined) {
+      return evidenceVersion;
+    }
+
+    const evidenceValidation = validateEvidenceBundleRef(value.evidenceBundleRef);
+    if (evidenceValidation !== undefined) {
+      return evidenceValidation;
+    }
   }
 
   return undefined;

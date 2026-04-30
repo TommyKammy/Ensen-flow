@@ -136,6 +136,23 @@ describe("sequential workflow runner", () => {
     ]);
   });
 
+  it("runs a workflow that declares the supported EIP protocol version", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.protocolVersion = "0.1.0";
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-supported-eip"
+      }
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.run.workflowId).toBe("local-manual-demo");
+  });
+
   it("rejects cyclic dependencies before writing state or audit records", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     definition.steps[0].dependsOn = ["notify-operator"];
@@ -154,6 +171,34 @@ describe("sequential workflow runner", () => {
       })
     ).rejects.toThrow("workflow definition dependencies cannot be ordered");
 
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects unsupported EIP protocol versions before writing state or audit records", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    (definition as WorkflowDefinition & { protocolVersion: string }).protocolVersion = "1.0.0";
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let stepHandlerCalled = false;
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-unsupported-eip"
+        },
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow(
+      "unsupported EIP protocolVersion \"1.0.0\"; fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version"
+    );
+
+    expect(stepHandlerCalled).toBe(false);
     await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });

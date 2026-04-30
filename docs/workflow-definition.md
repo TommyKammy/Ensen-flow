@@ -9,6 +9,7 @@ services.
 
 The schema includes:
 
+- an optional supported EIP `protocolVersion` boundary marker
 - stable workflow and step IDs using kebab-case identifiers
 - one trigger per workflow
 - ordered step definitions with explicit `dependsOn` dependencies
@@ -41,6 +42,7 @@ runtime dispatch implementation.
 
 ```json
 {
+  "protocolVersion": "0.1.0",
   "schemaVersion": "flow.workflow.v1",
   "id": "local-manual-demo",
   "name": "Local manual demo",

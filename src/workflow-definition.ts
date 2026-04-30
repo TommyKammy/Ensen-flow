@@ -1,3 +1,8 @@
+import {
+  eipVersionBoundary,
+  isSupportedEipProtocolVersion
+} from "./eip-version.js";
+
 const WORKFLOW_SCHEMA_VERSION = "flow.workflow.v1";
 
 const TRIGGER_TYPES = new Set(["manual", "schedule", "webhook"]);
@@ -35,6 +40,7 @@ const INPUT_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "field", "required
 const WORKFLOW_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "template"]);
 const STATIC_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "value"]);
 const WORKFLOW_ALLOWED_KEYS = new Set([
+  "protocolVersion",
   "schemaVersion",
   "id",
   "name",
@@ -56,6 +62,7 @@ const STEP_ALLOWED_KEYS = new Set([
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
 export interface WorkflowDefinition {
+  protocolVersion?: string;
   schemaVersion: WorkflowSchemaVersion;
   id: string;
   name?: string;
@@ -153,6 +160,7 @@ export const validateWorkflowDefinition = (
   }
 
   rejectEnsenLoopSpecificFields(value, "", errors);
+  rejectUnsupportedEipProtocolVersion(value, errors);
   rejectUnknownKeys(value, WORKFLOW_ALLOWED_KEYS, "", errors);
   requireLiteral(value, "schemaVersion", WORKFLOW_SCHEMA_VERSION, errors);
   requireStableId(value, "id", "workflow.id", errors);
@@ -532,6 +540,26 @@ const rejectEnsenLoopSpecificFields = (
         message: `${key} is outside the workflow definition schema boundary`
       });
     }
+  }
+};
+
+const rejectUnsupportedEipProtocolVersion = (
+  value: Record<string, unknown>,
+  errors: WorkflowDefinitionValidationError[]
+): void => {
+  if (!("protocolVersion" in value)) {
+    return;
+  }
+
+  const protocolVersion = value.protocolVersion;
+  if (
+    typeof protocolVersion !== "string" ||
+    !isSupportedEipProtocolVersion(protocolVersion)
+  ) {
+    errors.push({
+      path: "workflow.protocolVersion",
+      message: `unsupported EIP protocolVersion ${JSON.stringify(protocolVersion)}; ${eipVersionBoundary.unsupportedMajorVersionPolicy}`
+    });
   }
 };
 

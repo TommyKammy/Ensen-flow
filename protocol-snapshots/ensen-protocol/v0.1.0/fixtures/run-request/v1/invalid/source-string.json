@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "eip.run-request.v1",
+  "id": "req_01HV7Y8M8F2KQ5W3P9R6T4N2EA",
+  "correlationId": "corr_01HV7Y8M8F2KQ5W3P9R6T4N2EB",
+  "idempotencyKey": "manual-request-20260429-3",
+  "source": "github",
+  "requestedBy": {
+    "actorId": "actor_01HV7Y8M8F2KQ5W3P9R6T4N2EC",
+    "actorType": "api_client"
+  },
+  "workItem": {
+    "workItemId": "workitem_01HV7Y8M8F2KQ5W3P9R6T4N2ED",
+    "externalId": "4"
+  },
+  "mode": "plan",
+  "createdAt": "2026-04-29T01:45:45Z"
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "eip.run-status.v1",
+  "id": "sts_01HV9ZX8J2K6T3QW4R5Y7M8N9W",
+  "requestId": "req_01HV9ZX8J2K6T3QW4R5Y7M8N9Q",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
+  "status": "completed",
+  "observedAt": "2026-04-29T00:05:00Z",
+  "completedAt": "2026-04-29T00:05:00Z",
+  "changeRequests": [
+    {
+      "changeRequestId": "pr_01HV9ZX8J2K6T3QW4R5Y7M8N9X"
+    }
+  ]
+}

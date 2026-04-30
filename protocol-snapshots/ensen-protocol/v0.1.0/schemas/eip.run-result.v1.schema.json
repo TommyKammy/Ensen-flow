@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eip.ensen.dev/schemas/eip.run-result.v1.schema.json",
+  "title": "EIP-0002 RunResult v1",
+  "description": "Transport-neutral terminal result contract for completed Ensen-compatible executor runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "requestId",
+    "correlationId",
+    "status",
+    "completedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "eip.run-result.v1"
+    },
+    "id": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "requestId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "correlationId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/CorrelationId"
+    },
+    "status": {
+      "$ref": "#/$defs/RunResultStatus"
+    },
+    "completedAt": {
+      "$ref": "eip.common.v1.schema.json#/$defs/IsoDateTimeUtc"
+    },
+    "changeRequests": {
+      "type": "array",
+      "items": {
+        "$ref": "eip.common.v1.schema.json#/$defs/ChangeRequestRef"
+      },
+      "maxItems": 50
+    },
+    "evidenceBundles": {
+      "type": "array",
+      "items": {
+        "$ref": "eip.common.v1.schema.json#/$defs/EvidenceBundleRef"
+      },
+      "maxItems": 50
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationSummary"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "eip.common.v1.schema.json#/$defs/ErrorInfo"
+      },
+      "maxItems": 50
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WarningInfo"
+      },
+      "maxItems": 50
+    },
+    "metrics": {
+      "$ref": "#/$defs/RunMetrics"
+    },
+    "extensions": {
+      "$ref": "eip.common.v1.schema.json#/$defs/ExtensionMap"
+    }
+  },
+  "$defs": {
+    "RunResultStatus": {
+      "type": "string",
+      "enum": ["succeeded", "failed", "blocked", "needs_review", "cancelled"]
+    },
+    "VerificationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "blocked", "not_run"]
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerificationCommand"
+          },
+          "maxItems": 50
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "VerificationCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "blocked", "not_run"]
+        },
+        "completedAt": {
+          "$ref": "eip.common.v1.schema.json#/$defs/IsoDateTimeUtc"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "WarningInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "RunMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tokensInput": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokensOutput": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

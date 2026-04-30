@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "eip.evidence-bundle-ref.v1",
+  "id": "evb_01HV9ZX8J2K6T3QW4R5Y7M8N9S",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
+  "type": "local_path",
+  "uri": "artifacts/evidence/run-01HV9ZX8J2K6T3QW4R5Y7M8N9Q/bundle.json",
+  "createdAt": "2026-04-29T00:00:00Z",
+  "contentType": "application/json",
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "metadata": {
+    "producer": "ensen-loop",
+    "command": "npm test",
+    "redacted": true
+  }
+}

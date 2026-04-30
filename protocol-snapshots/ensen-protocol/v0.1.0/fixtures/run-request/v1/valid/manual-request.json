@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "eip.run-request.v1",
+  "id": "req_01HV7Y8M8F2KQ5W3P9R6T4N2BA",
+  "correlationId": "corr_01HV7Y8M8F2KQ5W3P9R6T4N2BB",
+  "idempotencyKey": "manual-request-20260429-1",
+  "source": {
+    "sourceId": "source_01HV7Y8M8F2KQ5W3P9R6T4N2BC",
+    "sourceType": "manual",
+    "externalRef": "operator-intake"
+  },
+  "requestedBy": {
+    "actorId": "actor_01HV7Y8M8F2KQ5W3P9R6T4N2BD",
+    "actorType": "human",
+    "displayName": "Example Operator"
+  },
+  "workItem": {
+    "workItemId": "workitem_01HV7Y8M8F2KQ5W3P9R6T4N2BE",
+    "externalId": "manual-2026-04-29-001",
+    "title": "Review protocol fixture coverage"
+  },
+  "mode": "validate",
+  "createdAt": "2026-04-29T02:00:00Z",
+  "dataClassification": "public"
+}

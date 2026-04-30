@@ -66,6 +66,20 @@ but it does not claim EIP conformance and does not import Ensen-protocol runtime
 packages. Formal protocol mapping belongs to a later protocol or connector
 integration phase.
 
+## Ensen-protocol Snapshot
+
+The copied Ensen-protocol v0.1.0 schema and conformance fixture snapshot is
+documented in
+`protocol-snapshots/ensen-protocol/v0.1.0/README.md`. It is repo-owned fixture
+data, not a runtime package dependency or a pointer to a sibling checkout.
+
+Ensen-flow currently exposes an EIP version boundary for later connector tests:
+protocol version `0.1.0`, release tag `v0.1.0`, and
+`runtimeDependency: false`. Workflow definitions may declare
+`protocolVersion: "0.1.0"` as an optional boundary marker. Unsupported EIP major
+versions must fail closed until a future Ensen-flow connector boundary explicitly
+supports them.
+
 ## Local Sequential Runner
 
 The Phase 1 local runner can execute a validated workflow definition through a

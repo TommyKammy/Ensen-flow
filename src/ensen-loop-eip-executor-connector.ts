@@ -1,5 +1,6 @@
 import {
   createExecutorConnectorCapabilities,
+  createUnsupportedExecutorConnectorOperationResult,
   mapExecutorPolicyDecisionToFlowControlState
 } from "./executor-connector.js";
 import type {
@@ -72,7 +73,6 @@ export const createEnsenLoopEipExecutorConnector = (
 ): ExecutorConnector => {
   const connectorId = input.connectorId ?? "ensen-loop-eip";
   const now = input.now ?? (() => new Date().toISOString());
-  const submittedRequests = new Map<string, EipRunRequestV1>();
 
   return {
     identity: {
@@ -80,12 +80,20 @@ export const createEnsenLoopEipExecutorConnector = (
       displayName: "Ensen-loop EIP Executor Connector",
       version: "eip.run-request.v1"
     },
-    capabilities: createExecutorConnectorCapabilities(),
+    capabilities: {
+      ...createExecutorConnectorCapabilities(),
+      cancel:
+        input.transport.cancelRunRequest === undefined
+          ? {
+              supported: false,
+              reason: "transport does not support cancellation"
+            }
+          : { supported: true }
+    },
     async submit(request: ExecutorSubmitRequest): Promise<ExecutorConnectorSubmitResult> {
       const payload = createRunRequestPayload(request, now());
       const submitted = await input.transport.submitRunRequest(payload);
       const requestId = submitted.requestId ?? payload.id;
-      submittedRequests.set(requestId, payload);
 
       return {
         ok: true,
@@ -102,10 +110,6 @@ export const createEnsenLoopEipExecutorConnector = (
       };
     },
     async status(request: ExecutorConnectorStatusRequest): Promise<ExecutorConnectorStatusResult> {
-      if (!submittedRequests.has(request.requestId)) {
-        return invalidRequest(connectorId, "status", "Ensen-loop EIP request is unknown");
-      }
-
       const snapshot = await input.transport.getRunStatusSnapshot(request);
       const statusVersion = requireSchemaVersion(
         snapshot,
@@ -184,32 +188,41 @@ export const createEnsenLoopEipExecutorConnector = (
       };
     },
     async cancel(request: ExecutorConnectorCancelRequest): Promise<ExecutorConnectorCancelResult> {
-      if (!submittedRequests.has(request.requestId)) {
-        return invalidRequest(connectorId, "cancel", "Ensen-loop EIP request is unknown");
+      if (input.transport.cancelRunRequest === undefined) {
+        return createUnsupportedExecutorConnectorOperationResult({
+          connectorId,
+          operation: "cancel",
+          reason: "transport does not support cancellation"
+        });
       }
 
-      const cancelled = input.transport.cancelRunRequest === undefined
-        ? { requestId: request.requestId, cancelled: true, observedAt: now() }
-        : await input.transport.cancelRunRequest(request);
+      const cancelled = await input.transport.cancelRunRequest(request);
+      const cancelValidation = validateCancelReceipt(cancelled);
+
+      if (cancelValidation !== undefined) {
+        return invalidRequest(connectorId, "cancel", cancelValidation.message, cancelValidation.reason);
+      }
+
+      const cancelReceipt = cancelled as {
+        requestId?: string;
+        cancelled: boolean;
+        observedAt?: string;
+      };
 
       return {
         ok: true,
         connectorId,
         operation: "cancel",
         value: {
-          requestId: cancelled.requestId ?? request.requestId,
-          cancelled: cancelled.cancelled ?? true,
-          observedAt: cancelled.observedAt
+          requestId: cancelReceipt.requestId ?? request.requestId,
+          cancelled: cancelReceipt.cancelled,
+          observedAt: cancelReceipt.observedAt
         }
       };
     },
     async fetchEvidence(
       request: ExecutorConnectorFetchEvidenceRequest
     ): Promise<ExecutorConnectorFetchEvidenceResult> {
-      if (!submittedRequests.has(request.requestId)) {
-        return invalidRequest(connectorId, "fetchEvidence", "Ensen-loop EIP request is unknown");
-      }
-
       const evidence = await input.transport.getEvidenceBundleRef(request);
       const evidenceVersion = requireSchemaVersion(
         evidence,
@@ -385,6 +398,40 @@ const validateRunStatusSnapshot = (
     return failClosedReason("EIP RunStatusSnapshot status is unsupported or malformed");
   }
 
+  if (value.observedAt !== undefined && typeof value.observedAt !== "string") {
+    return failClosedReason("EIP RunStatusSnapshot observedAt must be a string");
+  }
+
+  if (value.message !== undefined && typeof value.message !== "string") {
+    return failClosedReason("EIP RunStatusSnapshot message must be a string");
+  }
+
+  if (value.progress !== undefined && !isRecord(value.progress)) {
+    return failClosedReason("EIP RunStatusSnapshot progress must be an object");
+  }
+
+  return undefined;
+};
+
+const validateCancelReceipt = (
+  value: unknown
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP cancel receipt must be an object");
+  }
+
+  if (value.requestId !== undefined && typeof value.requestId !== "string") {
+    return failClosedReason("EIP cancel receipt requestId must be a string");
+  }
+
+  if (typeof value.cancelled !== "boolean") {
+    return failClosedReason("EIP cancel receipt cancelled must be a boolean");
+  }
+
+  if (value.observedAt !== undefined && typeof value.observedAt !== "string") {
+    return failClosedReason("EIP cancel receipt observedAt must be a string");
+  }
+
   return undefined;
 };
 
@@ -402,6 +449,46 @@ const validateRunResult = (
 
   if (!isRunResultStatus(value.status)) {
     return failClosedReason("EIP RunResult status is unsupported or malformed");
+  }
+
+  if (value.completedAt !== undefined && typeof value.completedAt !== "string") {
+    return failClosedReason("EIP RunResult completedAt must be a string");
+  }
+
+  if (value.verification !== undefined) {
+    if (!isRecord(value.verification)) {
+      return failClosedReason("EIP RunResult verification must be an object");
+    }
+
+    if (
+      value.verification.status !== undefined &&
+      typeof value.verification.status !== "string"
+    ) {
+      return failClosedReason("EIP RunResult verification.status must be a string");
+    }
+
+    if (
+      value.verification.summary !== undefined &&
+      typeof value.verification.summary !== "string"
+    ) {
+      return failClosedReason("EIP RunResult verification.summary must be a string");
+    }
+  }
+
+  if (value.evidenceBundles !== undefined && !Array.isArray(value.evidenceBundles)) {
+    return failClosedReason("EIP RunResult evidenceBundles must be an array");
+  }
+
+  if (value.errors !== undefined && !Array.isArray(value.errors)) {
+    return failClosedReason("EIP RunResult errors must be an array");
+  }
+
+  if (value.warnings !== undefined && !Array.isArray(value.warnings)) {
+    return failClosedReason("EIP RunResult warnings must be an array");
+  }
+
+  if (value.metrics !== undefined && !isRecord(value.metrics)) {
+    return failClosedReason("EIP RunResult metrics must be an object");
   }
 
   return undefined;

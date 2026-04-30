@@ -550,6 +550,163 @@ describe("Ensen-loop EIP executor connector", () => {
     });
   });
 
+  it("does not advertise or synthesize cancellation when the EIP transport has no cancel endpoint", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "running"
+          };
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for a running status");
+        },
+        getEvidenceBundleRef() {
+          return {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_loop_eip_bundle"
+          };
+        }
+      }
+    });
+
+    expect(connector.capabilities.cancel).toEqual({
+      supported: false,
+      reason: "transport does not support cancellation"
+    });
+
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.cancel({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "cancel",
+      error: {
+        code: "unsupported-operation",
+        reason: "transport does not support cancellation"
+      }
+    });
+  });
+
+  it("fails closed when an EIP cancel endpoint omits the cancelled receipt", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "running"
+          };
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for a cancel receipt");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for a cancel receipt");
+        },
+        cancelRunRequest() {
+          return {
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1"
+          };
+        }
+      }
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.cancel({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "cancel",
+      error: {
+        code: "invalid-request",
+        reason: "EIP cancel receipt cancelled must be a boolean"
+      }
+    });
+  });
+
+  it("uses remote EIP payload validation instead of same-instance submit state", async () => {
+    const observedStatusRequests: string[] = [];
+    const transport = {
+      submitRunRequest(payload: { id: string }) {
+        return { requestId: payload.id };
+      },
+      getRunStatusSnapshot(request: { requestId: string }) {
+        observedStatusRequests.push(request.requestId);
+        return {
+          schemaVersion: "eip.run-status.v1",
+          requestId: request.requestId,
+          status: "running",
+          observedAt: "2026-04-30T04:00:02.000Z"
+        };
+      },
+      getRunResult() {
+        throw new Error("result should not be fetched for a running status");
+      },
+      getEvidenceBundleRef(request: { requestId: string }) {
+        return {
+          schemaVersion: "eip.evidence-bundle-ref.v1",
+          id: "evb_loop_eip_bundle",
+          requestId: request.requestId
+        };
+      },
+      cancelRunRequest(request: { requestId: string }) {
+        return {
+          requestId: request.requestId,
+          cancelled: true,
+          observedAt: "2026-04-30T04:00:04.000Z"
+        };
+      }
+    };
+    const submittingConnector = createEnsenLoopEipExecutorConnector({ transport });
+    const submitted = await submittingConnector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    const followUpConnector = createEnsenLoopEipExecutorConnector({ transport });
+
+    expect(await followUpConnector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: true,
+      value: {
+        requestId: submitted.value.requestId,
+        status: "running"
+      }
+    });
+    expect(await followUpConnector.fetchEvidence({ requestId: submitted.value.requestId }))
+      .toMatchObject({
+        ok: true,
+        value: {
+          requestId: submitted.value.requestId,
+          evidence: {
+            schemaVersion: "eip.evidence-bundle-ref.v1"
+          }
+        }
+      });
+    expect(await followUpConnector.cancel({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: true,
+      value: {
+        requestId: submitted.value.requestId,
+        cancelled: true
+      }
+    });
+    expect(observedStatusRequests).toEqual([submitted.value.requestId]);
+  });
+
   it("maps blocked and needs-review EIP RunResult statuses to flow-owned states", async () => {
     const createTerminalConnector = (status: "blocked" | "needs_review", summary: string) =>
       createEnsenLoopEipExecutorConnector({
@@ -677,6 +834,92 @@ describe("Ensen-loop EIP executor connector", () => {
         code: "invalid-request",
         retryable: false,
         reason: "unsupported EIP RunStatusSnapshot schemaVersion eip.run-status.v2"
+      }
+    });
+  });
+
+  it("fails closed for malformed optional EIP RunStatusSnapshot fields", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "running",
+            message: 123
+          };
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for malformed status snapshots");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for malformed status snapshots");
+        }
+      }
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        reason: "EIP RunStatusSnapshot message must be a string"
+      }
+    });
+  });
+
+  it("fails closed for malformed optional EIP RunResult fields", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "completed",
+            observedAt: "2026-04-30T04:00:02.000Z"
+          };
+        },
+        getRunResult() {
+          return {
+            schemaVersion: "eip.run-result.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "succeeded",
+            verification: {
+              status: "passed",
+              summary: 123
+            }
+          };
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for malformed run results");
+        }
+      }
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        reason: "EIP RunResult verification.summary must be a string"
       }
     });
   });

@@ -32,6 +32,7 @@ export interface ConnectorErrorBody {
   message: string;
   retryable: boolean;
   reason?: string;
+  failureClass?: "protocol-gap" | "loop-gap" | "flow-gap";
 }
 
 export type ConnectorResult<TValue = unknown> =

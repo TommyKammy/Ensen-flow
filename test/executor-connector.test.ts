@@ -146,6 +146,32 @@ describe("executor connector abstraction", () => {
     });
   });
 
+  it("keeps empty fake status scripts well-formed by using the default terminal status", async () => {
+    const connector = createFakeExecutorTransport({
+      statusScript: []
+    });
+    const submitted = await connector.submit({
+      ...submitRequest,
+      policyDecision: { decision: "allow" }
+    });
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: true,
+      value: {
+        requestId: submitted.value.requestId,
+        status: "succeeded",
+        result: {
+          status: "succeeded",
+          summary: "fake executor completed bounded work"
+        }
+      }
+    });
+  });
+
   it("maps blocked and needs-review fake outcomes to flow-owned control state", async () => {
     const blocked = createFakeExecutorTransport({
       statusScript: [

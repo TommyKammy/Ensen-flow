@@ -53,7 +53,7 @@ export const createFakeExecutorTransport = (
   const connectorId = input.connectorId ?? "fake-executor-transport";
   const capabilities = createFakeCapabilities(input.capabilities);
   const records = new Map<string, FakeExecutorRecord>();
-  const statusScript = input.statusScript ?? [
+  const defaultStatusScript: FakeExecutorStatusScriptItem[] = [
     {
       status: "succeeded",
       observedAt: "2026-04-30T04:00:01.000Z",
@@ -63,6 +63,10 @@ export const createFakeExecutorTransport = (
       }
     }
   ];
+  const statusScript =
+    Array.isArray(input.statusScript) && input.statusScript.length > 0
+      ? input.statusScript
+      : defaultStatusScript;
   const evidence = input.evidence ?? {
     kind: "fake-executor-evidence",
     uri: "artifacts/fake-executor/evidence.json"

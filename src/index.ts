@@ -17,6 +17,12 @@ export {
 } from "./connector.js";
 
 export {
+  createExecutorConnectorCapabilities,
+  createUnsupportedExecutorConnectorOperationResult,
+  mapExecutorPolicyDecisionToFlowControlState
+} from "./executor-connector.js";
+
+export {
   eipVersionBoundary,
   isSupportedEipProtocolVersion
 } from "./eip-version.js";
@@ -46,6 +52,29 @@ export type {
   UnsupportedConnectorOperationInput,
   WorkflowConnector
 } from "./connector.js";
+
+export type {
+  ExecutorConnector,
+  ExecutorConnectorCancelReceipt,
+  ExecutorConnectorCancelRequest,
+  ExecutorConnectorCancelResult,
+  ExecutorConnectorEvidenceBundle,
+  ExecutorConnectorExecutionResult,
+  ExecutorConnectorExecutionStatus,
+  ExecutorConnectorFetchEvidenceRequest,
+  ExecutorConnectorFetchEvidenceResult,
+  ExecutorConnectorResultStatus,
+  ExecutorConnectorStatusRequest,
+  ExecutorConnectorStatusResult,
+  ExecutorConnectorStatusSnapshot,
+  ExecutorConnectorSubmitReceipt,
+  ExecutorConnectorSubmitResult,
+  ExecutorFlowControlState,
+  ExecutorFlowControlStateName,
+  ExecutorPolicyDecision,
+  ExecutorPolicyDecisionPayload,
+  ExecutorSubmitRequest
+} from "./executor-connector.js";
 
 export type { EipVersionBoundary } from "./eip-version.js";
 

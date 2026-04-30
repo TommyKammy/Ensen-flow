@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const runbookPath = "docs/x-gate2-loop-flow-smoke-runbook.md";
 const posixHomeRootPattern = new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/"));
+const linuxHomeRootPattern = new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/"));
 const windowsHomeRootPattern = new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\"));
 
 describe("X-Gate 2 loop-flow smoke runbook", () => {
@@ -26,6 +27,7 @@ describe("X-Gate 2 loop-flow smoke runbook", () => {
     expect(runbook).toContain("no regulated workflow");
     expect(runbook).toContain("X-Gate 2 can be marked reached");
     expect(runbook).not.toMatch(posixHomeRootPattern);
+    expect(runbook).not.toMatch(linuxHomeRootPattern);
     expect(runbook).not.toMatch(windowsHomeRootPattern);
   });
 });

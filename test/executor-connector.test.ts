@@ -715,7 +715,9 @@ describe("Ensen-loop EIP executor connector", () => {
         observedStatusRequests.push(request.requestId);
         return {
           schemaVersion: "eip.run-status.v1",
+          id: "sts_loop_eip_status",
           requestId: request.requestId,
+          correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
           status: "running",
           observedAt: "2026-04-30T04:00:02.000Z"
         };
@@ -917,8 +919,11 @@ describe("Ensen-loop EIP executor connector", () => {
         getRunStatusSnapshot() {
           return {
             schemaVersion: "eip.run-status.v1",
+            id: "sts_loop_eip_status",
             requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
             status: "running",
+            observedAt: "2026-04-30T04:00:02.000Z",
             message: 123
           };
         },
@@ -947,6 +952,89 @@ describe("Ensen-loop EIP executor connector", () => {
     });
   });
 
+  it.each([
+    {
+      name: "missing id",
+      snapshot: {
+        schemaVersion: "eip.run-status.v1",
+        requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+        correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
+        status: "running",
+        observedAt: "2026-04-30T04:00:02.000Z"
+      },
+      reason: "EIP RunStatusSnapshot id is malformed"
+    },
+    {
+      name: "missing correlationId",
+      snapshot: {
+        schemaVersion: "eip.run-status.v1",
+        id: "sts_loop_eip_status",
+        requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+        status: "running",
+        observedAt: "2026-04-30T04:00:02.000Z"
+      },
+      reason: "EIP RunStatusSnapshot correlationId is malformed"
+    },
+    {
+      name: "missing observedAt",
+      snapshot: {
+        schemaVersion: "eip.run-status.v1",
+        id: "sts_loop_eip_status",
+        requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+        correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
+        status: "running"
+      },
+      reason: "EIP RunStatusSnapshot observedAt is malformed"
+    },
+    {
+      name: "malformed observedAt",
+      snapshot: {
+        schemaVersion: "eip.run-status.v1",
+        id: "sts_loop_eip_status",
+        requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+        correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
+        status: "running",
+        observedAt: "2026-04-30 04:00:02"
+      },
+      reason: "EIP RunStatusSnapshot observedAt is malformed"
+    }
+  ])("fails closed for required EIP RunStatusSnapshot field validation: $name", async ({
+    snapshot,
+    reason
+  }) => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return snapshot;
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for invalid status snapshots");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for invalid status snapshots");
+        }
+      }
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        reason
+      }
+    });
+  });
+
   it("fails closed for malformed optional EIP RunResult fields", async () => {
     const connector = createEnsenLoopEipExecutorConnector({
       transport: {
@@ -956,7 +1044,9 @@ describe("Ensen-loop EIP executor connector", () => {
         getRunStatusSnapshot() {
           return {
             schemaVersion: "eip.run-status.v1",
+            id: "sts_loop_eip_status",
             requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
             status: "completed",
             observedAt: "2026-04-30T04:00:02.000Z"
           };
@@ -1072,7 +1162,9 @@ describe("Ensen-loop EIP executor connector", () => {
         getRunStatusSnapshot() {
           return {
             schemaVersion: "eip.run-status.v1",
+            id: "sts_loop_eip_status",
             requestId,
+            correlationId: "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
             status: "completed",
             observedAt: "2026-04-29T00:05:00Z"
           };

@@ -11,9 +11,41 @@ export const baselineInfo: BaselineInfo = {
 };
 
 export {
+  ConnectorOperationUnsupportedError,
+  createImmediateOnlyConnectorCapabilities,
+  createUnsupportedConnectorOperationResult
+} from "./connector.js";
+
+export {
   eipVersionBoundary,
   isSupportedEipProtocolVersion
 } from "./eip-version.js";
+
+export type {
+  ConnectorCancelReceipt,
+  ConnectorCancelRequest,
+  ConnectorCancelResult,
+  ConnectorCapabilities,
+  ConnectorErrorBody,
+  ConnectorErrorCode,
+  ConnectorEvidenceBundle,
+  ConnectorExecutionStatus,
+  ConnectorFetchEvidenceRequest,
+  ConnectorFetchEvidenceResult,
+  ConnectorIdentity,
+  ConnectorOperation,
+  ConnectorOperationSupport,
+  ConnectorResult,
+  ConnectorStatusRequest,
+  ConnectorStatusResult,
+  ConnectorStatusSnapshot,
+  ConnectorSubmitReceipt,
+  ConnectorSubmitRequest,
+  ConnectorSubmitResult,
+  CreateImmediateOnlyConnectorCapabilitiesInput,
+  UnsupportedConnectorOperationInput,
+  WorkflowConnector
+} from "./connector.js";
 
 export type { EipVersionBoundary } from "./eip-version.js";
 

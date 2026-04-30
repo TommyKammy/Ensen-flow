@@ -13,6 +13,7 @@ import {
 } from "../src/index.js";
 import type {
   ExecutorSubmitRequest,
+  EipRunRequestV1,
   WorkflowDefinition
 } from "../src/index.js";
 
@@ -26,27 +27,27 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       cliPath,
       [
         "#!/usr/bin/env node",
-        "const chunks = [];",
-        "for await (const chunk of process.stdin) chunks.push(chunk);",
-        "const envelope = JSON.parse(Buffer.concat(chunks).toString('utf8'));",
-        "const requestId = envelope.request?.id ?? envelope.requestId;",
-        "const correlationId = envelope.request?.correlationId ?? `corr_${requestId.slice(4)}`;",
-        "switch (envelope.operation) {",
-        "  case 'submit':",
-        "    process.stdout.write(JSON.stringify({ requestId, acceptedAt: '2026-04-30T04:00:00.000Z' }));",
-        "    break;",
-        "  case 'status':",
-        "    process.stdout.write(JSON.stringify({",
+        "import { readFileSync } from 'node:fs';",
+        "const command = process.argv[2];",
+        "const requestPath = process.argv[3];",
+        "if (command !== 'x-gate2-smoke' || requestPath === undefined) {",
+        "  process.stderr.write('expected x-gate2-smoke <run-request-json-file>');",
+        "  process.exitCode = 2;",
+        "} else {",
+        "  const request = JSON.parse(readFileSync(requestPath, 'utf8'));",
+        "  const requestId = request.id;",
+        "  const correlationId = request.correlationId;",
+        "  process.stdout.write(JSON.stringify({",
+        "    schemaVersion: 'ensen-loop.x-gate2-smoke.v1',",
+        "    statusSnapshot: {",
         "      schemaVersion: 'eip.run-status.v1',",
         "      id: 'sts_cli_loop_smoke',",
         "      requestId,",
         "      correlationId,",
         "      status: 'completed',",
         "      observedAt: '2026-04-30T04:00:02.000Z'",
-        "    }));",
-        "    break;",
-        "  case 'result':",
-        "    process.stdout.write(JSON.stringify({",
+        "    },",
+        "    runResult: {",
         "      schemaVersion: 'eip.run-result.v1',",
         "      id: 'run_cli_loop_smoke',",
         "      requestId,",
@@ -55,10 +56,8 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "      completedAt: '2026-04-30T04:00:03.000Z',",
         "      verification: { status: 'passed', summary: 'CLI dry-run smoke completed.' },",
         "      evidenceBundles: [{ evidenceBundleId: 'evb_cli_loop_smoke', digest: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }]",
-        "    }));",
-        "    break;",
-        "  case 'evidence':",
-        "    process.stdout.write(JSON.stringify({",
+        "    },",
+        "    evidenceBundleRef: {",
         "      schemaVersion: 'eip.evidence-bundle-ref.v1',",
         "      id: 'evb_cli_loop_smoke',",
         "      correlationId,",
@@ -66,11 +65,8 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "      uri: 'artifacts/evidence/cli-loop-smoke/bundle.json',",
         "      createdAt: '2026-04-30T04:00:03.000Z',",
         "      contentType: 'application/json'",
-        "    }));",
-        "    break;",
-        "  default:",
-        "    process.stderr.write(`unsupported operation ${envelope.operation}`);",
-        "    process.exitCode = 2;",
+        "    }",
+        "  }));",
         "}",
         ""
       ].join("\n"),
@@ -82,7 +78,7 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       const connector = createEnsenLoopEipExecutorConnector({
         transport: createCliEnsenLoopEipExecutorTransport({
           command: process.execPath,
-          args: [cliPath]
+          args: [cliPath, "x-gate2-smoke"]
         }),
         now: () => "2026-04-30T04:00:00.000Z"
       });
@@ -244,13 +240,13 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     try {
       const transport = createCliEnsenLoopEipExecutorTransport({
         command: process.execPath,
-        args: [cliPath]
+        args: [cliPath, "x-gate2-smoke"]
       });
 
-      await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+      await expect(transport.submitRunRequest(createSmokeRunRequest()))
         .rejects.toMatchObject({
           failureClass: expectedClass,
-          operation: "status"
+          operation: "submit"
         });
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -279,14 +275,14 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     try {
       const transport = createCliEnsenLoopEipExecutorTransport({
         command: process.execPath,
-        args: [cliPath],
+        args: [cliPath, "x-gate2-smoke"],
         timeoutMs: 100
       });
 
-      await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+      await expect(transport.submitRunRequest(createSmokeRunRequest()))
         .rejects.toMatchObject({
           failureClass: "loop-gap",
-          operation: "status",
+          operation: "submit",
           stderr: "ignored SIGTERM"
         });
     } finally {
@@ -304,12 +300,23 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "#!/usr/bin/env node",
         "process.on('SIGTERM', () => {",
         "  process.stdout.write(JSON.stringify({",
-        "    schemaVersion: 'eip.run-status.v1',",
-        "    id: 'sts_cli_loop_timeout_grace',",
-        "    requestId: 'req_cli_loop_smoke',",
-        "    correlationId: 'corr_cli_loop_timeout_grace',",
-        "    status: 'completed',",
-        "    observedAt: '2026-04-30T04:00:02.000Z'",
+        "    schemaVersion: 'ensen-loop.x-gate2-smoke.v1',",
+        "    statusSnapshot: {",
+        "      schemaVersion: 'eip.run-status.v1',",
+        "      id: 'sts_cli_loop_timeout_grace',",
+        "      requestId: 'req_cli_loop_smoke',",
+        "      correlationId: 'corr_cli_loop_smoke',",
+        "      status: 'completed',",
+        "      observedAt: '2026-04-30T04:00:02.000Z'",
+        "    },",
+        "    runResult: {",
+        "      schemaVersion: 'eip.run-result.v1',",
+        "      id: 'run_cli_loop_timeout_grace',",
+        "      requestId: 'req_cli_loop_smoke',",
+        "      correlationId: 'corr_cli_loop_smoke',",
+        "      status: 'succeeded',",
+        "      completedAt: '2026-04-30T04:00:03.000Z'",
+        "    }",
         "  }));",
         "  process.exit(0);",
         "});",
@@ -324,12 +331,15 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     try {
       const transport = createCliEnsenLoopEipExecutorTransport({
         command: process.execPath,
-        args: [cliPath],
+        args: [cliPath, "x-gate2-smoke"],
         timeoutMs: 100
       });
 
-      await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
-        .resolves.toMatchObject({
+      await expect(transport.submitRunRequest(createSmokeRunRequest())).resolves.toMatchObject({
+        requestId: "req_cli_loop_smoke"
+      });
+      expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+        .toMatchObject({
           schemaVersion: "eip.run-status.v1",
           requestId: "req_cli_loop_smoke",
           status: "completed"
@@ -344,12 +354,36 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       command: "ensen-flow-missing-loop-cli-command"
     });
 
-    await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+    await expect(transport.submitRunRequest(createSmokeRunRequest()))
       .rejects.toBeInstanceOf(EnsenLoopCliTransportError);
-    await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+    await expect(transport.submitRunRequest(createSmokeRunRequest()))
       .rejects.toMatchObject({
         failureClass: "flow-gap",
-        operation: "status"
+        operation: "submit"
       });
   });
+});
+
+const createSmokeRunRequest = (): EipRunRequestV1 => ({
+  schemaVersion: "eip.run-request.v1",
+  id: "req_cli_loop_smoke",
+  correlationId: "corr_cli_loop_smoke",
+  idempotencyKey: "cli-loop-smoke-0001",
+  source: {
+    sourceId: "source_ensen_flow",
+    sourceType: "manual",
+    externalRef: "cli-smoke"
+  },
+  requestedBy: {
+    actorId: "actor_ensen_flow",
+    actorType: "system",
+    displayName: "Ensen-flow"
+  },
+  workItem: {
+    workItemId: "workitem_cli_loop_smoke",
+    externalId: "cli-loop-smoke",
+    title: "CLI Loop dry-run smoke"
+  },
+  mode: "validate",
+  createdAt: "2026-04-30T04:00:00.000Z"
 });

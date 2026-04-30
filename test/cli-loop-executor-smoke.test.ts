@@ -39,6 +39,12 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "  const correlationId = request.correlationId;",
         "  process.stdout.write(JSON.stringify({",
         "    schemaVersion: 'ensen-loop.x-gate2-smoke.v1',",
+        "    boundary: 'local-cli-stdout',",
+        "    requestId,",
+        "    correlationId,",
+        "    mutatesRepository: false,",
+        "    invokesProvider: false,",
+        "    writesDurableEvidence: false,",
         "    statusSnapshot: {",
         "      schemaVersion: 'eip.run-status.v1',",
         "      id: 'sts_cli_loop_smoke',",
@@ -299,6 +305,14 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       expectedMessage: "EIP RunStatusSnapshot requestId does not match the submitted request"
     },
     {
+      name: "top-level correlationId",
+      aggregate: {
+        ...createSmokeAggregate(),
+        correlationId: "corr_wrong_cli_loop_smoke"
+      },
+      expectedMessage: "EIP XGate2SmokeAggregate correlationId does not match nested payloads"
+    },
+    {
       name: "run result schemaVersion",
       aggregate: {
         ...createSmokeAggregate(),
@@ -353,6 +367,114 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       expect(() =>
         transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" })
       ).toThrow(EnsenLoopCliTransportError);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("consumes a blocked smoke aggregate from non-zero CLI stdout", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-blocked-"));
+    const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "import { readFileSync } from 'node:fs';",
+        "const requestPath = process.argv[3];",
+        "const request = JSON.parse(readFileSync(requestPath, 'utf8'));",
+        "process.stdout.write(JSON.stringify(createBlockedAggregate(request.id, request.correlationId)));",
+        "process.stderr.write('blocked by Loop X-Gate 2 smoke prerequisites');",
+        "process.exitCode = 1;",
+        "function createBlockedAggregate(requestId, correlationId) {",
+        "  return {",
+        "    schemaVersion: 'ensen-loop.x-gate2-smoke.v1',",
+        "    boundary: 'local-cli-stdout',",
+        "    requestId,",
+        "    correlationId,",
+        "    mutatesRepository: false,",
+        "    invokesProvider: false,",
+        "    writesDurableEvidence: false,",
+        "    statusSnapshot: {",
+        "      schemaVersion: 'eip.run-status.v1',",
+        "      id: 'sts_cli_loop_blocked',",
+        "      requestId,",
+        "      correlationId,",
+        "      status: 'blocked',",
+        "      observedAt: '2026-04-30T04:00:02.000Z',",
+        "      message: 'Loop smoke blocked before external execution.'",
+        "    },",
+        "    runResult: {",
+        "      schemaVersion: 'eip.run-result.v1',",
+        "      id: 'run_cli_loop_blocked',",
+        "      requestId,",
+        "      correlationId,",
+        "      status: 'blocked',",
+        "      completedAt: '2026-04-30T04:00:03.000Z',",
+        "      verification: {",
+        "        status: 'blocked',",
+        "        summary: 'Loop smoke blocked before external execution.'",
+        "      },",
+        "      errors: [{ code: 'missing-prerequisite', message: 'Loop smoke prerequisites are unavailable.' }]",
+        "    }",
+        "  };",
+        "}",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const connector = createEnsenLoopEipExecutorConnector({
+        transport: createCliEnsenLoopEipExecutorTransport({
+          command: process.execPath,
+          args: [cliPath, "x-gate2-smoke"]
+        })
+      });
+
+      const submitted = await connector.submit({
+        workflow: {
+          id: "cli-loop-smoke",
+          version: "flow.workflow.v1"
+        },
+        run: {
+          id: "cli-loop-smoke"
+        },
+        step: {
+          id: "loop-dry-run",
+          attempt: 1
+        },
+        idempotencyKey: "cli-loop-smoke-0001",
+        policyDecision: { decision: "allow" },
+        source: createSmokeRunRequest().source,
+        requestedBy: createSmokeRunRequest().requestedBy,
+        workItem: createSmokeRunRequest().workItem
+      });
+
+      expect(submitted).toMatchObject({
+        ok: true,
+        value: {
+          requestId: "req_cli_loop_smoke_loop_dry_run_1"
+        }
+      });
+
+      const status = await connector.status({ requestId: "req_cli_loop_smoke_loop_dry_run_1" });
+
+      expect(status).toMatchObject({
+        ok: true,
+        value: {
+          requestId: "req_cli_loop_smoke_loop_dry_run_1",
+          status: "blocked",
+          flowControl: {
+            state: "blocked"
+          },
+          result: {
+            status: "blocked",
+            summary: "Loop smoke blocked before external execution."
+          }
+        }
+      });
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -495,6 +617,12 @@ const createSmokeRunRequest = (): EipRunRequestV1 => ({
 
 const createSmokeAggregate = () => ({
   schemaVersion: "ensen-loop.x-gate2-smoke.v1",
+  boundary: "local-cli-stdout",
+  requestId: "req_cli_loop_smoke",
+  correlationId: "corr_cli_loop_smoke",
+  mutatesRepository: false,
+  invokesProvider: false,
+  writesDurableEvidence: false,
   statusSnapshot: {
     schemaVersion: "eip.run-status.v1",
     id: "sts_cli_loop_smoke",

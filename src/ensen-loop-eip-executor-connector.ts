@@ -276,7 +276,10 @@ export const createEnsenLoopEipExecutorConnector = (
 
 interface EipRunStatusSnapshotV1 {
   schemaVersion: "eip.run-status.v1";
+  id: string;
   requestId: string;
+  correlationId: string;
+  runId?: string;
   status:
     | "accepted"
     | "queued"
@@ -287,9 +290,10 @@ interface EipRunStatusSnapshotV1 {
     | "failed"
     | "blocked"
     | "unknown";
-  observedAt?: string;
+  observedAt: string;
   message?: string;
   progress?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
 }
 
 interface EipRunResultV1 {
@@ -429,16 +433,24 @@ const validateRunStatusSnapshot = (
     return failClosedReason(`EIP RunStatusSnapshot has unsupported field ${unknownProperty}`);
   }
 
-  if (typeof value.requestId !== "string" || value.requestId !== expectedRequestId) {
+  if (!isPrefixedId(value.id, "sts")) {
+    return failClosedReason("EIP RunStatusSnapshot id is malformed");
+  }
+
+  if (!isPrefixedId(value.requestId, "req") || value.requestId !== expectedRequestId) {
     return failClosedReason("EIP RunStatusSnapshot requestId does not match the submitted request");
+  }
+
+  if (!isCorrelationId(value.correlationId)) {
+    return failClosedReason("EIP RunStatusSnapshot correlationId is malformed");
   }
 
   if (!isRunStatus(value.status)) {
     return failClosedReason("EIP RunStatusSnapshot status is unsupported or malformed");
   }
 
-  if (value.observedAt !== undefined && typeof value.observedAt !== "string") {
-    return failClosedReason("EIP RunStatusSnapshot observedAt must be a string");
+  if (!isIsoDateTimeUtc(value.observedAt)) {
+    return failClosedReason("EIP RunStatusSnapshot observedAt is malformed");
   }
 
   if (value.message !== undefined && typeof value.message !== "string") {

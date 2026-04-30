@@ -422,7 +422,8 @@ const invokeEnsenLoopXGate2SmokeCli = async (
         ...input,
         args: [...(input.args ?? []), requestPath]
       },
-      operation: "submit"
+      operation: "submit",
+      allowNonZeroJsonStdout: true
     });
     const version = requireSchemaVersion(
       aggregate,
@@ -499,6 +500,7 @@ const invokeJsonCli = async (run: {
   input: CreateCliEnsenLoopEipExecutorTransportInput;
   operation: EnsenLoopCliOperation;
   stdin?: string;
+  allowNonZeroJsonStdout?: boolean;
 }): Promise<unknown> => {
   const { input, operation } = run;
   const child = spawn(input.command, input.args ?? [], {
@@ -584,7 +586,9 @@ const invokeJsonCli = async (run: {
 
   const { code, signal } = result;
 
-  if (code !== 0) {
+  const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
+
+  if (code !== 0 && run.allowNonZeroJsonStdout !== true) {
     throw new EnsenLoopCliTransportError({
       message: `Ensen-loop CLI transport failed during ${operation} with exit code ${code ?? signal ?? "unknown"}`,
       failureClass: "loop-gap",
@@ -594,12 +598,15 @@ const invokeJsonCli = async (run: {
     });
   }
 
-  const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
   if (stdout.length === 0) {
     throw new EnsenLoopCliTransportError({
-      message: `Ensen-loop CLI transport returned empty stdout during ${operation}`,
-      failureClass: "protocol-gap",
+      message:
+        code === 0
+          ? `Ensen-loop CLI transport returned empty stdout during ${operation}`
+          : `Ensen-loop CLI transport failed during ${operation} with exit code ${code ?? signal ?? "unknown"} and empty stdout`,
+      failureClass: code === 0 ? "protocol-gap" : "loop-gap",
       operation,
+      ...(code === null || code === 0 ? {} : { exitCode: code }),
       ...(stderr.length === 0 ? {} : { stderr })
     });
   }
@@ -608,9 +615,13 @@ const invokeJsonCli = async (run: {
     return JSON.parse(stdout) as unknown;
   } catch (error) {
     throw new EnsenLoopCliTransportError({
-      message: `Ensen-loop CLI transport returned non-JSON stdout during ${operation}`,
-      failureClass: "protocol-gap",
+      message:
+        code === 0
+          ? `Ensen-loop CLI transport returned non-JSON stdout during ${operation}`
+          : `Ensen-loop CLI transport failed during ${operation} with exit code ${code ?? signal ?? "unknown"} and non-JSON stdout`,
+      failureClass: code === 0 ? "protocol-gap" : "loop-gap",
       operation,
+      ...(code === null || code === 0 ? {} : { exitCode: code }),
       ...(stderr.length === 0 ? {} : { stderr })
     });
   }
@@ -787,6 +798,12 @@ interface EipRunResultV1 {
 
 interface EnsenLoopXGate2SmokeAggregateV1 {
   schemaVersion: "ensen-loop.x-gate2-smoke.v1";
+  boundary?: string;
+  requestId?: string;
+  correlationId?: string;
+  mutatesRepository?: boolean;
+  invokesProvider?: boolean;
+  writesDurableEvidence?: boolean;
   statusSnapshot: EipRunStatusSnapshotV1;
   runResult: EipRunResultV1;
   evidenceBundleRef?: Record<string, unknown>;
@@ -951,6 +968,12 @@ const validateXGate2SmokeAggregate = (
 ): { message: string; reason: string } | undefined => {
   const unknownProperty = findUnknownProperty(value, [
     "schemaVersion",
+    "boundary",
+    "requestId",
+    "correlationId",
+    "mutatesRepository",
+    "invokesProvider",
+    "writesDurableEvidence",
     "statusSnapshot",
     "runResult",
     "evidenceBundleRef"
@@ -970,6 +993,24 @@ const validateXGate2SmokeAggregate = (
 
   if (value.evidenceBundleRef !== undefined && !isRecord(value.evidenceBundleRef)) {
     return failClosedReason("EIP XGate2SmokeAggregate evidenceBundleRef must be an object");
+  }
+
+  if (value.boundary !== undefined && value.boundary !== "local-cli-stdout") {
+    return failClosedReason("EIP XGate2SmokeAggregate boundary is unsupported or malformed");
+  }
+
+  for (const field of ["mutatesRepository", "invokesProvider", "writesDurableEvidence"]) {
+    if (value[field] !== undefined && typeof value[field] !== "boolean") {
+      return failClosedReason(`EIP XGate2SmokeAggregate ${field} must be a boolean`);
+    }
+  }
+
+  if (value.requestId !== undefined) {
+    if (typeof value.requestId !== "string" || value.requestId !== expectedRequestId) {
+      return failClosedReason(
+        "EIP XGate2SmokeAggregate requestId does not match the submitted request"
+      );
+    }
   }
 
   const statusVersion = requireSchemaVersion(
@@ -994,6 +1035,16 @@ const validateXGate2SmokeAggregate = (
   const resultValidation = validateRunResult(value.runResult, expectedRequestId);
   if (resultValidation !== undefined) {
     return resultValidation;
+  }
+
+  if (
+    value.statusSnapshot.correlationId !== value.runResult.correlationId ||
+    (value.correlationId !== undefined &&
+      value.correlationId !== value.statusSnapshot.correlationId)
+  ) {
+    return failClosedReason(
+      "EIP XGate2SmokeAggregate correlationId does not match nested payloads"
+    );
   }
 
   if (value.evidenceBundleRef !== undefined) {

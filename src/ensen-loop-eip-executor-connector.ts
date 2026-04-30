@@ -68,6 +68,39 @@ export interface CreateEnsenLoopEipExecutorConnectorInput {
   now?: () => string;
 }
 
+export interface CreateFakeEnsenLoopEipExecutorTransportInput {
+  acceptedAt?: string;
+  observedAt?: string;
+  completedAt?: string;
+  verificationSummary?: string;
+  statusSnapshots?: FakeEnsenLoopEipPayload[];
+  result?: FakeEnsenLoopEipPayload;
+  evidenceBundleRef?: FakeEnsenLoopEipPayload;
+}
+
+export interface FakeEnsenLoopEipExecutorTransport extends EnsenLoopEipExecutorTransport {
+  readonly submittedRunRequests: EipRunRequestV1[];
+}
+
+export type FakeEnsenLoopEipPayload =
+  | Record<string, unknown>
+  | unknown[]
+  | string
+  | number
+  | boolean
+  | null
+  | ((context: FakeEnsenLoopEipPayloadContext) => unknown);
+
+export interface FakeEnsenLoopEipPayloadContext {
+  requestId: string;
+  request?: EipRunRequestV1;
+}
+
+interface FakeEnsenLoopEipRecord {
+  request: EipRunRequestV1;
+  statusIndex: number;
+}
+
 export const createEnsenLoopEipExecutorConnector = (
   input: CreateEnsenLoopEipExecutorConnectorInput
 ): ExecutorConnector => {
@@ -274,6 +307,109 @@ export const createEnsenLoopEipExecutorConnector = (
   };
 };
 
+export const createFakeEnsenLoopEipExecutorTransport = (
+  input: CreateFakeEnsenLoopEipExecutorTransportInput = {}
+): FakeEnsenLoopEipExecutorTransport => {
+  const submittedRunRequests: EipRunRequestV1[] = [];
+  const records = new Map<string, FakeEnsenLoopEipRecord>();
+
+  return {
+    get submittedRunRequests() {
+      return submittedRunRequests;
+    },
+    submitRunRequest(request: EipRunRequestV1) {
+      submittedRunRequests.push(request);
+      records.set(request.id, {
+        request,
+        statusIndex: 0
+      });
+
+      return {
+        requestId: request.id,
+        acceptedAt: input.acceptedAt ?? "2026-04-30T04:00:00.000Z",
+        evidence: {
+          kind: "fake-ensen-loop-eip-transport",
+          requestId: request.id
+        }
+      };
+    },
+    getRunStatusSnapshot(request: { requestId: string }) {
+      const record = records.get(request.requestId);
+      const context = {
+        requestId: request.requestId,
+        ...(record === undefined ? {} : { request: record.request })
+      };
+      const scripted = nextFakeScriptedPayload(record, input.statusSnapshots);
+
+      if (scripted !== undefined) {
+        return resolveFakePayload(scripted, context);
+      }
+
+      return {
+        schemaVersion: "eip.run-status.v1",
+        id: `sts_${safeIdentifier(request.requestId)}`,
+        requestId: request.requestId,
+        correlationId: record?.request.correlationId ?? `corr_${safeIdentifier(request.requestId)}`,
+        status: "completed",
+        observedAt: input.observedAt ?? "2026-04-30T04:00:02.000Z",
+        message: "Fake Ensen-loop EIP transport completed the run request."
+      };
+    },
+    getRunResult(request: { requestId: string }) {
+      const record = records.get(request.requestId);
+      const context = {
+        requestId: request.requestId,
+        ...(record === undefined ? {} : { request: record.request })
+      };
+
+      if (input.result !== undefined) {
+        return resolveFakePayload(input.result, context);
+      }
+
+      return {
+        schemaVersion: "eip.run-result.v1",
+        id: `run_${safeIdentifier(request.requestId)}`,
+        requestId: request.requestId,
+        correlationId: record?.request.correlationId ?? `corr_${safeIdentifier(request.requestId)}`,
+        status: "succeeded",
+        completedAt: input.completedAt ?? "2026-04-30T04:00:03.000Z",
+        verification: {
+          status: "passed",
+          summary: input.verificationSummary ?? "Fake Ensen-loop EIP transport succeeded."
+        },
+        evidenceBundles: [
+          {
+            evidenceBundleId: `evb_${safeIdentifier(request.requestId)}`,
+            digest:
+              "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      };
+    },
+    getEvidenceBundleRef(request: { requestId: string }) {
+      const record = records.get(request.requestId);
+      const context = {
+        requestId: request.requestId,
+        ...(record === undefined ? {} : { request: record.request })
+      };
+
+      if (input.evidenceBundleRef !== undefined) {
+        return resolveFakePayload(input.evidenceBundleRef, context);
+      }
+
+      return {
+        schemaVersion: "eip.evidence-bundle-ref.v1",
+        id: `evb_${safeIdentifier(request.requestId)}`,
+        correlationId: record?.request.correlationId ?? `corr_${safeIdentifier(request.requestId)}`,
+        type: "local_path",
+        uri: `artifacts/evidence/${request.requestId}/bundle.json`,
+        createdAt: input.completedAt ?? "2026-04-30T04:00:03.000Z",
+        contentType: "application/json"
+      };
+    }
+  };
+};
+
 interface EipRunStatusSnapshotV1 {
   schemaVersion: "eip.run-status.v1";
   id: string;
@@ -295,6 +431,33 @@ interface EipRunStatusSnapshotV1 {
   progress?: Record<string, unknown>;
   extensions?: Record<string, unknown>;
 }
+
+const nextFakeScriptedPayload = (
+  record: FakeEnsenLoopEipRecord | undefined,
+  script: FakeEnsenLoopEipPayload[] | undefined
+): FakeEnsenLoopEipPayload | undefined => {
+  if (script === undefined || script.length === 0) {
+    return undefined;
+  }
+
+  const index = record?.statusIndex ?? 0;
+  if (record !== undefined) {
+    record.statusIndex += 1;
+  }
+
+  return script[Math.min(index, script.length - 1)];
+};
+
+const resolveFakePayload = (
+  payload: FakeEnsenLoopEipPayload,
+  context: FakeEnsenLoopEipPayloadContext
+): unknown => {
+  if (typeof payload === "function") {
+    return payload(context);
+  }
+
+  return payload;
+};
 
 interface EipRunResultV1 {
   schemaVersion: "eip.run-result.v1";

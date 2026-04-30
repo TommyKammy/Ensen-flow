@@ -92,6 +92,17 @@ export const createEnsenLoopEipExecutorConnector = (
     },
     async submit(request: ExecutorSubmitRequest): Promise<ExecutorConnectorSubmitResult> {
       const payload = createRunRequestPayload(request, now());
+      const payloadValidation = validateRunRequest(payload);
+
+      if (payloadValidation !== undefined) {
+        return invalidRequest(
+          connectorId,
+          "submit",
+          payloadValidation.message,
+          payloadValidation.reason
+        );
+      }
+
       const submitted = await input.transport.submitRunRequest(payload);
       const requestId = submitted.requestId ?? payload.id;
 
@@ -236,6 +247,17 @@ export const createEnsenLoopEipExecutorConnector = (
           "fetchEvidence",
           evidenceVersion.message,
           evidenceVersion.reason
+        );
+      }
+
+      const evidenceValidation = validateEvidenceBundleRef(evidence);
+
+      if (evidenceValidation !== undefined) {
+        return invalidRequest(
+          connectorId,
+          "fetchEvidence",
+          evidenceValidation.message,
+          evidenceValidation.reason
         );
       }
 
@@ -390,6 +412,23 @@ const validateRunStatusSnapshot = (
     return failClosedReason("EIP RunStatusSnapshot must be an object");
   }
 
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "id",
+    "requestId",
+    "correlationId",
+    "runId",
+    "status",
+    "observedAt",
+    "message",
+    "progress",
+    "extensions"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunStatusSnapshot has unsupported field ${unknownProperty}`);
+  }
+
   if (typeof value.requestId !== "string" || value.requestId !== expectedRequestId) {
     return failClosedReason("EIP RunStatusSnapshot requestId does not match the submitted request");
   }
@@ -411,6 +450,90 @@ const validateRunStatusSnapshot = (
   }
 
   return undefined;
+};
+
+const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP RunRequest must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "id",
+    "correlationId",
+    "idempotencyKey",
+    "source",
+    "requestedBy",
+    "workItem",
+    "mode",
+    "createdAt",
+    "target",
+    "policyContext",
+    "dataClassification",
+    "extensions"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunRequest has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isPrefixedId(value.id, "req")) {
+    return failClosedReason("EIP RunRequest id is malformed");
+  }
+
+  if (!isCorrelationId(value.correlationId)) {
+    return failClosedReason("EIP RunRequest correlationId is malformed");
+  }
+
+  if (
+    typeof value.idempotencyKey !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{11,159}$/.test(value.idempotencyKey)
+  ) {
+    return failClosedReason("EIP RunRequest idempotencyKey is malformed");
+  }
+
+  const sourceValidation = validateSourceRef(value.source, "EIP RunRequest source");
+  if (sourceValidation !== undefined) {
+    return sourceValidation;
+  }
+
+  const actorValidation = validateActorRef(value.requestedBy, "EIP RunRequest requestedBy");
+  if (actorValidation !== undefined) {
+    return actorValidation;
+  }
+
+  const workItemValidation = validateRunRequestWorkItem(value.workItem);
+  if (workItemValidation !== undefined) {
+    return workItemValidation;
+  }
+
+  if (!isRunRequestMode(value.mode)) {
+    return failClosedReason("EIP RunRequest mode is unsupported or malformed");
+  }
+
+  if (!isIsoDateTimeUtc(value.createdAt)) {
+    return failClosedReason("EIP RunRequest createdAt is malformed");
+  }
+
+  if (value.target !== undefined) {
+    const targetValidation = validateRunRequestTarget(value.target);
+    if (targetValidation !== undefined) {
+      return targetValidation;
+    }
+  }
+
+  if (value.policyContext !== undefined) {
+    const policyValidation = validatePolicyContext(value.policyContext);
+    if (policyValidation !== undefined) {
+      return policyValidation;
+    }
+  }
+
+  if (value.dataClassification !== undefined && !isDataClassification(value.dataClassification)) {
+    return failClosedReason("EIP RunRequest dataClassification is unsupported or malformed");
+  }
+
+  return validateExtensionMap(value.extensions, "EIP RunRequest extensions");
 };
 
 const validateCancelReceipt = (
@@ -448,6 +571,26 @@ const validateRunResult = (
 ): { message: string; reason: string } | undefined => {
   if (!isRecord(value)) {
     return failClosedReason("EIP RunResult must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "id",
+    "requestId",
+    "correlationId",
+    "status",
+    "completedAt",
+    "changeRequests",
+    "evidenceBundles",
+    "verification",
+    "errors",
+    "warnings",
+    "metrics",
+    "extensions"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunResult has unsupported field ${unknownProperty}`);
   }
 
   if (typeof value.requestId !== "string" || value.requestId !== expectedRequestId) {
@@ -496,6 +639,98 @@ const validateRunResult = (
 
   if (value.metrics !== undefined && !isRecord(value.metrics)) {
     return failClosedReason("EIP RunResult metrics must be an object");
+  }
+
+  return undefined;
+};
+
+const validateEvidenceBundleRef = (
+  value: unknown
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP EvidenceBundleRef must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "id",
+    "correlationId",
+    "type",
+    "uri",
+    "createdAt",
+    "contentType",
+    "checksum",
+    "metadata"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP EvidenceBundleRef has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isPrefixedId(value.id, "evb")) {
+    return failClosedReason("EIP EvidenceBundleRef id is malformed");
+  }
+
+  if (!isCorrelationId(value.correlationId)) {
+    return failClosedReason("EIP EvidenceBundleRef correlationId is malformed");
+  }
+
+  if (value.type !== "local_path" && value.type !== "file_uri") {
+    return failClosedReason("EIP EvidenceBundleRef type is unsupported or malformed");
+  }
+
+  if (typeof value.uri !== "string" || value.uri.length === 0 || value.uri.length > 1000) {
+    return failClosedReason("EIP EvidenceBundleRef uri is malformed");
+  }
+
+  if (value.type === "local_path" && !isLocalEvidencePath(value.uri)) {
+    return failClosedReason("EIP EvidenceBundleRef local_path uri is malformed");
+  }
+
+  if (value.type === "file_uri" && !isFileEvidenceUri(value.uri)) {
+    return failClosedReason("EIP EvidenceBundleRef file_uri uri is malformed");
+  }
+
+  if (!isIsoDateTimeUtc(value.createdAt)) {
+    return failClosedReason("EIP EvidenceBundleRef createdAt is malformed");
+  }
+
+  if (
+    value.contentType !== undefined &&
+    (typeof value.contentType !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[A-Za-z0-9_.-]+=[A-Za-z0-9_.+-]+)*$/.test(
+        value.contentType
+      ))
+  ) {
+    return failClosedReason("EIP EvidenceBundleRef contentType is malformed");
+  }
+
+  if (value.checksum !== undefined) {
+    if (!isRecord(value.checksum)) {
+      return failClosedReason("EIP EvidenceBundleRef checksum must be an object");
+    }
+
+    const checksumUnknownProperty = findUnknownProperty(value.checksum, ["algorithm", "value"]);
+    if (checksumUnknownProperty !== undefined) {
+      return failClosedReason(
+        `EIP EvidenceBundleRef checksum has unsupported field ${checksumUnknownProperty}`
+      );
+    }
+
+    if (value.checksum.algorithm !== "sha256") {
+      return failClosedReason("EIP EvidenceBundleRef checksum algorithm is unsupported");
+    }
+
+    if (
+      typeof value.checksum.value !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.checksum.value)
+    ) {
+      return failClosedReason("EIP EvidenceBundleRef checksum value is malformed");
+    }
+  }
+
+  if (value.metadata !== undefined && !isRecord(value.metadata)) {
+    return failClosedReason("EIP EvidenceBundleRef metadata must be an object");
   }
 
   return undefined;
@@ -587,6 +822,210 @@ const isRunResultStatus = (value: unknown): value is EipRunResultV1["status"] =>
   value === "needs_review" ||
   value === "cancelled";
 
+const isRunRequestMode = (value: unknown): value is EipRunRequestMode =>
+  value === "plan" || value === "apply" || value === "validate";
+
+const isDataClassification = (value: unknown): boolean =>
+  value === "public" ||
+  value === "internal" ||
+  value === "confidential" ||
+  value === "restricted";
+
+const validateSourceRef = (
+  value: unknown,
+  shapeName: string
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason(`${shapeName} must be an object`);
+  }
+
+  const unknownProperty = findUnknownProperty(value, ["sourceId", "sourceType", "externalRef"]);
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`${shapeName} has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isPrefixedId(value.sourceId, "source")) {
+    return failClosedReason(`${shapeName}.sourceId is malformed`);
+  }
+
+  if (
+    typeof value.sourceType !== "string" ||
+    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value.sourceType)
+  ) {
+    return failClosedReason(`${shapeName}.sourceType is malformed`);
+  }
+
+  if (value.externalRef !== undefined && !isNonEmptyString(value.externalRef, 240)) {
+    return failClosedReason(`${shapeName}.externalRef is malformed`);
+  }
+
+  return undefined;
+};
+
+const validateActorRef = (
+  value: unknown,
+  shapeName: string
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason(`${shapeName} must be an object`);
+  }
+
+  const unknownProperty = findUnknownProperty(value, ["actorId", "actorType", "displayName"]);
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`${shapeName} has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isPrefixedId(value.actorId, "actor")) {
+    return failClosedReason(`${shapeName}.actorId is malformed`);
+  }
+
+  if (!isActorType(value.actorType)) {
+    return failClosedReason(`${shapeName}.actorType is unsupported or malformed`);
+  }
+
+  if (value.displayName !== undefined && !isNonEmptyString(value.displayName, 160)) {
+    return failClosedReason(`${shapeName}.displayName is malformed`);
+  }
+
+  return undefined;
+};
+
+const validateRunRequestWorkItem = (
+  value: unknown
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP RunRequest workItem must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "workItemId",
+    "externalId",
+    "title",
+    "url"
+  ]);
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunRequest workItem has unsupported field ${unknownProperty}`);
+  }
+
+  if (!isPrefixedId(value.workItemId, "workitem")) {
+    return failClosedReason("EIP RunRequest workItem.workItemId is malformed");
+  }
+
+  if (!isNonEmptyString(value.externalId, 240)) {
+    return failClosedReason("EIP RunRequest workItem.externalId is malformed");
+  }
+
+  if (value.title !== undefined && !isNonEmptyString(value.title, 240)) {
+    return failClosedReason("EIP RunRequest workItem.title is malformed");
+  }
+
+  if (
+    value.url !== undefined &&
+    (typeof value.url !== "string" || value.url.length > 400 || !/^https:\/\/[^\s]+$/.test(value.url))
+  ) {
+    return failClosedReason("EIP RunRequest workItem.url is malformed");
+  }
+
+  return undefined;
+};
+
+const validateRunRequestTarget = (
+  value: unknown
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP RunRequest target must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, ["targetType", "targetId", "externalRef"]);
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunRequest target has unsupported field ${unknownProperty}`);
+  }
+
+  if (
+    value.targetType !== "repository" &&
+    value.targetType !== "workspace" &&
+    value.targetType !== "environment" &&
+    value.targetType !== "manual"
+  ) {
+    return failClosedReason("EIP RunRequest target.targetType is unsupported or malformed");
+  }
+
+  if (!isPrefixedId(value.targetId, value.targetType === "repository" ? "repo" : undefined)) {
+    return failClosedReason("EIP RunRequest target.targetId is malformed");
+  }
+
+  if (value.externalRef !== undefined && !isNonEmptyString(value.externalRef, 240)) {
+    return failClosedReason("EIP RunRequest target.externalRef is malformed");
+  }
+
+  return undefined;
+};
+
+const validatePolicyContext = (
+  value: unknown
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason("EIP RunRequest policyContext must be an object");
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "policySetId",
+    "riskClasses",
+    "requiresApproval"
+  ]);
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`EIP RunRequest policyContext has unsupported field ${unknownProperty}`);
+  }
+
+  if (value.policySetId !== undefined && !isPrefixedId(value.policySetId, "policy")) {
+    return failClosedReason("EIP RunRequest policyContext.policySetId is malformed");
+  }
+
+  if (
+    value.riskClasses !== undefined &&
+    (!Array.isArray(value.riskClasses) ||
+      value.riskClasses.some((item) => !isNonEmptyString(item, 80)))
+  ) {
+    return failClosedReason("EIP RunRequest policyContext.riskClasses is malformed");
+  }
+
+  if (value.requiresApproval !== undefined && typeof value.requiresApproval !== "boolean") {
+    return failClosedReason("EIP RunRequest policyContext.requiresApproval must be a boolean");
+  }
+
+  return undefined;
+};
+
+const validateExtensionMap = (
+  value: unknown,
+  shapeName: string
+): { message: string; reason: string } | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return failClosedReason(`${shapeName} must be an object`);
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!key.startsWith("x-")) {
+      return failClosedReason(`${shapeName} key ${key} must use x- prefix`);
+    }
+  }
+
+  return undefined;
+};
+
+const isActorType = (value: unknown): boolean =>
+  value === "human" ||
+  value === "workflow" ||
+  value === "system" ||
+  value === "api_client" ||
+  value === "connector" ||
+  value === "executor" ||
+  value === "agent";
+
 const invalidRequest = <TValue>(
   connectorId: string,
   operation: "submit" | "status" | "cancel" | "fetchEvidence",
@@ -613,3 +1052,42 @@ const safeIdentifier = (value: string): string =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const findUnknownProperty = (
+  value: Record<string, unknown>,
+  allowedProperties: readonly string[]
+): string | undefined => {
+  const allowed = new Set(allowedProperties);
+  return Object.keys(value).find((property) => !allowed.has(property));
+};
+
+const isPrefixedId = (value: unknown, expectedPrefix?: string): boolean => {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match = /^(actor|artifact|corr|cr|evb|evt|flowstep|policy|pr|repo|req|run|source|sts|workitem)_[A-Za-z0-9][A-Za-z0-9._~-]{5,127}$/.exec(
+    value
+  );
+
+  return match !== null && (expectedPrefix === undefined || match[1] === expectedPrefix);
+};
+
+const isCorrelationId = (value: unknown): boolean =>
+  typeof value === "string" && /^corr_[A-Za-z0-9][A-Za-z0-9._~-]{11,127}$/.test(value);
+
+const isIsoDateTimeUtc = (value: unknown): boolean =>
+  typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value);
+
+const isNonEmptyString = (value: unknown, maxLength: number): boolean =>
+  typeof value === "string" && value.length > 0 && value.length <= maxLength;
+
+const isLocalEvidencePath = (value: string): boolean =>
+  /^(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(
+    value
+  );
+
+const isFileEvidenceUri = (value: string): boolean =>
+  /^file:\/\/\/(?!.*(?:^|\/)\.\.(?:\/|$))[^\s?#]+$/.test(value) &&
+  !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#\s]*[^/?#\s:@]+:[^/?#\s:@]+@/.test(value);

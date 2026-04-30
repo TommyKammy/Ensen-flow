@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,6 +17,27 @@ import {
   createFakeExecutorTransport,
   fakeFlowControlForDecision
 } from "./support/fake-executor-transport.js";
+
+const protocolSnapshotRoot = join(
+  process.cwd(),
+  "protocol-snapshots",
+  "ensen-protocol",
+  "v0.1.0"
+);
+
+const readProtocolFixture = async (relativePath: string): Promise<unknown> =>
+  JSON.parse(await readFile(join(protocolSnapshotRoot, relativePath), "utf8")) as unknown;
+
+const isFixtureRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readFixtureRequestId = (value: unknown): string => {
+  if (!isFixtureRecord(value) || typeof value.requestId !== "string") {
+    throw new Error("fixture must include requestId");
+  }
+
+  return value.requestId;
+};
 
 describe("executor connector abstraction", () => {
   const submitRequest: ExecutorSubmitRequest = {
@@ -703,7 +727,10 @@ describe("Ensen-loop EIP executor connector", () => {
         return {
           schemaVersion: "eip.evidence-bundle-ref.v1",
           id: "evb_loop_eip_bundle",
-          requestId: request.requestId
+          correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
+          type: "local_path",
+          uri: `artifacts/evidence/${request.requestId}/bundle.json`,
+          createdAt: "2026-04-30T04:00:03.000Z"
         };
       },
       cancelRunRequest(request: { requestId: string }) {
@@ -965,5 +992,245 @@ describe("Ensen-loop EIP executor connector", () => {
         reason: "EIP RunResult verification.summary must be a string"
       }
     });
+  });
+
+  it("records the supported EIP snapshot/version on the connector boundary", () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          throw new Error("status should not be fetched for version visibility");
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for version visibility");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for version visibility");
+        }
+      }
+    });
+
+    expect(connector.identity.version).toBe("eip.run-request.v1");
+  });
+
+  it.each([
+    "fixtures/run-status/v1/valid/accepted-snapshot.json",
+    "fixtures/run-status/v1/valid/running-snapshot.json",
+    "fixtures/run-status/v1/valid/completed-snapshot.json"
+  ])("consumes valid EIP RunStatusSnapshot fixture %s", async (fixturePath) => {
+    const statusFixture = await readProtocolFixture(fixturePath);
+    const requestId = readFixtureRequestId(statusFixture);
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return statusFixture;
+        },
+        getRunResult() {
+          return {
+            schemaVersion: "eip.run-result.v1",
+            requestId,
+            status: "succeeded",
+            completedAt: "2026-04-29T00:05:00Z",
+            verification: {
+              status: "passed",
+              summary: "Run completed and verification passed."
+            }
+          };
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for status fixture validation");
+        }
+      }
+    });
+
+    expect(await connector.status({ requestId })).toMatchObject({
+      ok: true,
+      operation: "status",
+      value: {
+        requestId
+      }
+    });
+  });
+
+  it.each([
+    "fixtures/run-result/v1/valid/blocked-result.json",
+    "fixtures/run-result/v1/valid/failed-result.json",
+    "fixtures/run-result/v1/valid/succeeded-result.json"
+  ])("consumes valid EIP RunResult fixture %s", async (fixturePath) => {
+    const resultFixture = await readProtocolFixture(fixturePath);
+    const requestId = readFixtureRequestId(resultFixture);
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId,
+            status: "completed",
+            observedAt: "2026-04-29T00:05:00Z"
+          };
+        },
+        getRunResult() {
+          return resultFixture;
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for result fixture validation");
+        }
+      }
+    });
+
+    expect(await connector.status({ requestId })).toMatchObject({
+      ok: true,
+      operation: "status",
+      value: {
+        requestId
+      }
+    });
+  });
+
+  it.each([
+    "fixtures/evidence-bundle-ref/v1/valid/file-uri.json",
+    "fixtures/evidence-bundle-ref/v1/valid/local-path.json"
+  ])("consumes valid EIP EvidenceBundleRef fixture %s", async (fixturePath) => {
+    const evidenceFixture = await readProtocolFixture(fixturePath);
+    const requestId = "req_01HV9ZX8J2K6T3QW4R5Y7M8N9Q";
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          throw new Error("status should not be fetched for evidence fixture validation");
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for evidence fixture validation");
+        },
+        getEvidenceBundleRef() {
+          return evidenceFixture;
+        }
+      }
+    });
+
+    expect(await connector.fetchEvidence({ requestId })).toMatchObject({
+      ok: true,
+      operation: "fetchEvidence",
+      value: {
+        requestId,
+        evidence: evidenceFixture
+      }
+    });
+  });
+
+  it.each([
+    "fixtures/run-status/v1/invalid/final-result-only-fields.json"
+  ])("fails closed for invalid EIP RunStatusSnapshot fixture %s", async (fixturePath) => {
+    const invalidStatus = await readProtocolFixture(fixturePath);
+    const requestId = readFixtureRequestId(invalidStatus);
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return invalidStatus;
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for invalid status fixture validation");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for invalid status fixture validation");
+        }
+      }
+    });
+
+    expect(await connector.status({ requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false
+      }
+    });
+  });
+
+  it.each([
+    "fixtures/run-result/v1/invalid/missing-request-id.json",
+    "fixtures/run-result/v1/invalid/running-status.json"
+  ])("fails closed for invalid EIP RunResult fixture %s", async (fixturePath) => {
+    const invalidResult = await readProtocolFixture(fixturePath);
+    const requestId =
+      isFixtureRecord(invalidResult) && typeof invalidResult.requestId === "string"
+        ? invalidResult.requestId
+        : "req_01HV9ZX8J2K6T3QW4R5Y7M8N9Q";
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId,
+            status: "completed",
+            observedAt: "2026-04-29T00:05:00Z"
+          };
+        },
+        getRunResult() {
+          return invalidResult;
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for invalid result fixture validation");
+        }
+      }
+    });
+
+    expect(await connector.status({ requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false
+      }
+    });
+  });
+
+  it.each([
+    "fixtures/evidence-bundle-ref/v1/invalid/bad-checksum.json",
+    "fixtures/evidence-bundle-ref/v1/invalid/raw-secret-uri.json"
+  ])("fails closed for invalid EIP EvidenceBundleRef fixture %s", async (fixturePath) => {
+    const invalidEvidence = await readProtocolFixture(fixturePath);
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          throw new Error("status should not be fetched for evidence fixture validation");
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for evidence fixture validation");
+        },
+        getEvidenceBundleRef() {
+          return invalidEvidence;
+        }
+      }
+    });
+
+    expect(await connector.fetchEvidence({ requestId: "req_01HV9ZX8J2K6T3QW4R5Y7M8N9Q" }))
+      .toMatchObject({
+        ok: false,
+        operation: "fetchEvidence",
+        error: {
+          code: "invalid-request",
+          retryable: false
+        }
+      });
   });
 });

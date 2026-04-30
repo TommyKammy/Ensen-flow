@@ -90,6 +90,8 @@ export class EnsenLoopCliTransportError extends Error {
 
 export type EnsenLoopCliOperation = "submit" | "status" | "result" | "evidence";
 
+const cliTerminationGraceMs = 1000;
+
 export interface CreateCliEnsenLoopEipExecutorTransportInput {
   command: string;
   args?: string[];
@@ -391,9 +393,17 @@ const invokeEnsenLoopCli = async (
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
   let timeout: NodeJS.Timeout | undefined;
-  let timedOut = false;
+  let escalationTimeout: NodeJS.Timeout | undefined;
 
-  const completion = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+  type CompletionResult = {
+    type: "completion";
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  };
+  type TimeoutResult = { type: "timeout" };
+  type CliResult = CompletionResult | TimeoutResult;
+
+  const completion = new Promise<CliResult>(
     (resolve, reject) => {
       child.once("error", (error) => {
         reject(
@@ -405,7 +415,7 @@ const invokeEnsenLoopCli = async (
         );
       });
       child.once("close", (code, signal) => {
-        resolve({ code, signal });
+        resolve({ type: "completion", code, signal });
       });
     }
   );
@@ -417,23 +427,36 @@ const invokeEnsenLoopCli = async (
     stderrChunks.push(chunk);
   });
 
-  if (input.timeoutMs !== undefined) {
-    timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, input.timeoutMs);
-  }
+  const timeoutPromise =
+    input.timeoutMs === undefined
+      ? undefined
+      : new Promise<CliResult>((resolve) => {
+          timeout = setTimeout(() => {
+            child.kill("SIGTERM");
+            escalationTimeout = setTimeout(() => {
+              if (child.exitCode === null && child.signalCode === null) {
+                child.kill("SIGKILL");
+              }
+              resolve({ type: "timeout" });
+            }, cliTerminationGraceMs);
+          }, input.timeoutMs);
+        });
 
   child.stdin.end(`${JSON.stringify(envelope)}\n`);
 
-  const { code, signal } = await completion.finally(() => {
+  const result = await (timeoutPromise === undefined
+    ? completion
+    : Promise.race([completion, timeoutPromise])).finally(() => {
     if (timeout !== undefined) {
       clearTimeout(timeout);
+    }
+    if (escalationTimeout !== undefined) {
+      clearTimeout(escalationTimeout);
     }
   });
   const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
 
-  if (timedOut) {
+  if (result.type === "timeout") {
     throw new EnsenLoopCliTransportError({
       message: `Ensen-loop CLI transport timed out during ${operation}`,
       failureClass: "loop-gap",
@@ -441,6 +464,8 @@ const invokeEnsenLoopCli = async (
       stderr
     });
   }
+
+  const { code, signal } = result;
 
   if (code !== 0) {
     throw new EnsenLoopCliTransportError({

@@ -257,6 +257,88 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     }
   });
 
+  it("times out a CLI process that ignores SIGTERM", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-timeout-"));
+    const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "process.on('SIGTERM', () => {",
+        "  process.stderr.write('ignored SIGTERM');",
+        "});",
+        "for await (const _chunk of process.stdin) { }",
+        "setInterval(() => {}, 1000);",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath],
+        timeoutMs: 100
+      });
+
+      await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+        .rejects.toMatchObject({
+          failureClass: "loop-gap",
+          operation: "status",
+          stderr: "ignored SIGTERM"
+        });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not classify a CLI process that closes during timeout grace as timed out", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-timeout-"));
+    const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "process.on('SIGTERM', () => {",
+        "  process.stdout.write(JSON.stringify({",
+        "    schemaVersion: 'eip.run-status.v1',",
+        "    id: 'sts_cli_loop_timeout_grace',",
+        "    requestId: 'req_cli_loop_smoke',",
+        "    correlationId: 'corr_cli_loop_timeout_grace',",
+        "    status: 'completed',",
+        "    observedAt: '2026-04-30T04:00:02.000Z'",
+        "  }));",
+        "  process.exit(0);",
+        "});",
+        "for await (const _chunk of process.stdin) { }",
+        "setInterval(() => {}, 1000);",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath],
+        timeoutMs: 100
+      });
+
+      await expect(transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" }))
+        .resolves.toMatchObject({
+          schemaVersion: "eip.run-status.v1",
+          requestId: "req_cli_loop_smoke",
+          status: "completed"
+        });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("classifies an unstartable CLI command as a flow gap", async () => {
     const transport = createCliEnsenLoopEipExecutorTransport({
       command: "ensen-flow-missing-loop-cli-command"

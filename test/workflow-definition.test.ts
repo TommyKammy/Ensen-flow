@@ -33,6 +33,16 @@ describe("workflow definition schema", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("accepts the supported optional EIP protocol version", () => {
+    const workflow = readMutableWorkflowFixture();
+    workflow.protocolVersion = "0.1.0";
+
+    const result = validateWorkflowDefinition(workflow);
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it.each([
     [
       "missing workflow id",

@@ -136,6 +136,23 @@ describe("sequential workflow runner", () => {
     ]);
   });
 
+  it("runs a workflow that declares the supported EIP protocol version", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.protocolVersion = "0.1.0";
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-supported-eip"
+      }
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.run.workflowId).toBe("local-manual-demo");
+  });
+
   it("rejects cyclic dependencies before writing state or audit records", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     definition.steps[0].dependsOn = ["notify-operator"];

@@ -75,8 +75,10 @@ data, not a runtime package dependency or a pointer to a sibling checkout.
 
 Ensen-flow currently exposes an EIP version boundary for later connector tests:
 protocol version `0.1.0`, release tag `v0.1.0`, and
-`runtimeDependency: false`. Unsupported EIP major versions must fail closed
-until a future Ensen-flow connector boundary explicitly supports them.
+`runtimeDependency: false`. Workflow definitions may declare
+`protocolVersion: "0.1.0"` as an optional boundary marker. Unsupported EIP major
+versions must fail closed until a future Ensen-flow connector boundary explicitly
+supports them.
 
 ## Local Sequential Runner
 

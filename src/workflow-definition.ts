@@ -40,6 +40,7 @@ const INPUT_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "field", "required
 const WORKFLOW_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "template"]);
 const STATIC_IDEMPOTENCY_KEY_ALLOWED_KEYS = new Set(["source", "value"]);
 const WORKFLOW_ALLOWED_KEYS = new Set([
+  "protocolVersion",
   "schemaVersion",
   "id",
   "name",
@@ -61,6 +62,7 @@ const STEP_ALLOWED_KEYS = new Set([
 export type WorkflowSchemaVersion = typeof WORKFLOW_SCHEMA_VERSION;
 
 export interface WorkflowDefinition {
+  protocolVersion?: string;
   schemaVersion: WorkflowSchemaVersion;
   id: string;
   name?: string;

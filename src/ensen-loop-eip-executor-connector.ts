@@ -158,13 +158,13 @@ export const createCliEnsenLoopEipExecutorTransport = (
       };
     },
     getRunStatusSnapshot(request: { requestId: string }) {
-      return requireSmokeAggregate(smokeAggregates, request.requestId).statusSnapshot;
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "status").statusSnapshot;
     },
     getRunResult(request: { requestId: string }) {
-      return requireSmokeAggregate(smokeAggregates, request.requestId).runResult;
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "result").runResult;
     },
     getEvidenceBundleRef(request: { requestId: string }) {
-      return requireSmokeAggregate(smokeAggregates, request.requestId).evidenceBundleRef;
+      return requireSmokeAggregate(smokeAggregates, request.requestId, "evidence").evidenceBundleRef;
     }
   };
 };
@@ -446,7 +446,7 @@ const invokeEnsenLoopXGate2SmokeCli = async (
       });
     }
 
-    const aggregateValidation = validateXGate2SmokeAggregate(aggregate);
+    const aggregateValidation = validateXGate2SmokeAggregate(aggregate, request.id);
 
     if (aggregateValidation !== undefined) {
       throw new EnsenLoopCliTransportError({
@@ -464,7 +464,8 @@ const invokeEnsenLoopXGate2SmokeCli = async (
 
 const requireSmokeAggregate = (
   smokeAggregates: Map<string, EnsenLoopXGate2SmokeAggregateV1>,
-  requestId: string
+  requestId: string,
+  operation: EnsenLoopCliOperation
 ): EnsenLoopXGate2SmokeAggregateV1 => {
   const aggregate = smokeAggregates.get(requestId);
 
@@ -472,7 +473,7 @@ const requireSmokeAggregate = (
     throw new EnsenLoopCliTransportError({
       message: `Ensen-loop X-Gate 2 smoke aggregate is unavailable for request ${requestId}`,
       failureClass: "flow-gap",
-      operation: "status"
+      operation
     });
   }
 
@@ -945,7 +946,8 @@ const validateRunStatusSnapshot = (
 };
 
 const validateXGate2SmokeAggregate = (
-  value: Record<string, unknown>
+  value: Record<string, unknown>,
+  expectedRequestId: string
 ): { message: string; reason: string } | undefined => {
   const unknownProperty = findUnknownProperty(value, [
     "schemaVersion",
@@ -968,6 +970,46 @@ const validateXGate2SmokeAggregate = (
 
   if (value.evidenceBundleRef !== undefined && !isRecord(value.evidenceBundleRef)) {
     return failClosedReason("EIP XGate2SmokeAggregate evidenceBundleRef must be an object");
+  }
+
+  const statusVersion = requireSchemaVersion(
+    value.statusSnapshot,
+    "eip.run-status.v1",
+    "RunStatusSnapshot"
+  );
+  if (statusVersion !== undefined) {
+    return statusVersion;
+  }
+
+  const statusValidation = validateRunStatusSnapshot(value.statusSnapshot, expectedRequestId);
+  if (statusValidation !== undefined) {
+    return statusValidation;
+  }
+
+  const resultVersion = requireSchemaVersion(value.runResult, "eip.run-result.v1", "RunResult");
+  if (resultVersion !== undefined) {
+    return resultVersion;
+  }
+
+  const resultValidation = validateRunResult(value.runResult, expectedRequestId);
+  if (resultValidation !== undefined) {
+    return resultValidation;
+  }
+
+  if (value.evidenceBundleRef !== undefined) {
+    const evidenceVersion = requireSchemaVersion(
+      value.evidenceBundleRef,
+      "eip.evidence-bundle-ref.v1",
+      "EvidenceBundleRef"
+    );
+    if (evidenceVersion !== undefined) {
+      return evidenceVersion;
+    }
+
+    const evidenceValidation = validateEvidenceBundleRef(value.evidenceBundleRef);
+    if (evidenceValidation !== undefined) {
+      return evidenceValidation;
+    }
   }
 
   return undefined;

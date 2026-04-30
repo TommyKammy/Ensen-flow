@@ -253,6 +253,111 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     }
   });
 
+  it.each([
+    {
+      operation: "status",
+      call: (transport: ReturnType<typeof createCliEnsenLoopEipExecutorTransport>) =>
+        transport.getRunStatusSnapshot({ requestId: "req_missing_cli_loop_smoke" })
+    },
+    {
+      operation: "result",
+      call: (transport: ReturnType<typeof createCliEnsenLoopEipExecutorTransport>) =>
+        transport.getRunResult({ requestId: "req_missing_cli_loop_smoke" })
+    },
+    {
+      operation: "evidence",
+      call: (transport: ReturnType<typeof createCliEnsenLoopEipExecutorTransport>) =>
+        transport.getEvidenceBundleRef({ requestId: "req_missing_cli_loop_smoke" })
+    }
+  ])("labels missing cached aggregate errors as $operation", ({ operation, call }) => {
+    const transport = createCliEnsenLoopEipExecutorTransport({
+      command: "unused-loop-cli"
+    });
+
+    expect(() => call(transport)).toThrow(EnsenLoopCliTransportError);
+
+    try {
+      call(transport);
+    } catch (error) {
+      expect(error).toMatchObject({
+        failureClass: "flow-gap",
+        operation
+      });
+    }
+  });
+
+  it.each([
+    {
+      name: "status snapshot requestId",
+      aggregate: {
+        ...createSmokeAggregate(),
+        statusSnapshot: {
+          ...createSmokeAggregate().statusSnapshot,
+          requestId: "req_wrong_cli_loop_smoke"
+        }
+      },
+      expectedMessage: "EIP RunStatusSnapshot requestId does not match the submitted request"
+    },
+    {
+      name: "run result schemaVersion",
+      aggregate: {
+        ...createSmokeAggregate(),
+        runResult: {
+          ...createSmokeAggregate().runResult,
+          schemaVersion: "eip.run-result.v2"
+        }
+      },
+      expectedMessage: "unsupported EIP RunResult schemaVersion eip.run-result.v2"
+    },
+    {
+      name: "evidence bundle local path",
+      aggregate: {
+        ...createSmokeAggregate(),
+        evidenceBundleRef: {
+          ...createSmokeAggregate().evidenceBundleRef,
+          uri: "../evidence/cli-loop-smoke/bundle.json"
+        }
+      },
+      expectedMessage: "EIP EvidenceBundleRef local_path uri is malformed"
+    }
+  ])("rejects malformed nested aggregate $name before caching", async ({
+    aggregate,
+    expectedMessage
+  }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-invalid-"));
+    const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        `process.stdout.write(${JSON.stringify(JSON.stringify(aggregate))});`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath, "x-gate2-smoke"]
+      });
+
+      await expect(transport.submitRunRequest(createSmokeRunRequest()))
+        .rejects.toMatchObject({
+          failureClass: "protocol-gap",
+          operation: "submit",
+          message: expectedMessage
+        });
+      expect(() =>
+        transport.getRunStatusSnapshot({ requestId: "req_cli_loop_smoke" })
+      ).toThrow(EnsenLoopCliTransportError);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("times out a CLI process that ignores SIGTERM", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-timeout-"));
     const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
@@ -386,4 +491,37 @@ const createSmokeRunRequest = (): EipRunRequestV1 => ({
   },
   mode: "validate",
   createdAt: "2026-04-30T04:00:00.000Z"
+});
+
+const createSmokeAggregate = () => ({
+  schemaVersion: "ensen-loop.x-gate2-smoke.v1",
+  statusSnapshot: {
+    schemaVersion: "eip.run-status.v1",
+    id: "sts_cli_loop_smoke",
+    requestId: "req_cli_loop_smoke",
+    correlationId: "corr_cli_loop_smoke",
+    status: "completed",
+    observedAt: "2026-04-30T04:00:02.000Z"
+  },
+  runResult: {
+    schemaVersion: "eip.run-result.v1",
+    id: "run_cli_loop_smoke",
+    requestId: "req_cli_loop_smoke",
+    correlationId: "corr_cli_loop_smoke",
+    status: "succeeded",
+    completedAt: "2026-04-30T04:00:03.000Z",
+    verification: {
+      status: "passed",
+      summary: "CLI dry-run smoke completed."
+    }
+  },
+  evidenceBundleRef: {
+    schemaVersion: "eip.evidence-bundle-ref.v1",
+    id: "evb_cli_loop_smoke",
+    correlationId: "corr_cli_loop_smoke",
+    type: "local_path",
+    uri: "artifacts/evidence/cli-loop-smoke/bundle.json",
+    createdAt: "2026-04-30T04:00:03.000Z",
+    contentType: "application/json"
+  }
 });

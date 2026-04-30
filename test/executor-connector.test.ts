@@ -1,18 +1,22 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import {
   createEnsenLoopEipExecutorConnector,
+  createFakeEnsenLoopEipExecutorTransport,
   createImmediateOnlyConnectorCapabilities,
   createUnsupportedExecutorConnectorOperationResult,
   mapExecutorPolicyDecisionToFlowControlState
 } from "../src/index.js";
 import type {
   ExecutorConnectorStatusSnapshot,
-  ExecutorSubmitRequest
+  ExecutorSubmitRequest,
+  WorkflowDefinition
 } from "../src/index.js";
+import { readWorkflowRunState, runWorkflow } from "../src/index.js";
 import {
   createFakeExecutorTransport,
   fakeFlowControlForDecision
@@ -570,6 +574,185 @@ describe("Ensen-loop EIP executor connector", () => {
           type: "local_path",
           uri: "artifacts/evidence/loop-eip-demo-run/bundle.json"
         }
+      }
+    });
+  });
+
+  it("drives a workflow step through fake Ensen-loop EIP transport and persists the resulting run state", async () => {
+    const transport = createFakeEnsenLoopEipExecutorTransport({
+      completedAt: "2026-04-30T04:00:03.000Z",
+      verificationSummary: "Fake loop-like execution completed."
+    });
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport,
+      now: () => "2026-04-30T04:00:00.000Z"
+    });
+    const definition: WorkflowDefinition = {
+      schemaVersion: "flow.workflow.v1",
+      id: "loop-fake-transport-demo",
+      trigger: {
+        type: "manual",
+        idempotencyKey: {
+          source: "input",
+          field: "requestId",
+          required: true
+        }
+      },
+      steps: [
+        {
+          id: "loop-like-executor",
+          action: {
+            type: "local",
+            name: "fake_loop_eip_executor"
+          }
+        }
+      ]
+    };
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-loop-fake-"));
+    const statePath = join(tempRoot, "runs", "loop-fake-transport.jsonl");
+
+    try {
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId: "fake-loop-run"
+        },
+        now: (() => {
+          let index = 0;
+          const timestamps = [
+            "2026-04-30T04:00:00.000Z",
+            "2026-04-30T04:00:01.000Z",
+            "2026-04-30T04:00:02.000Z",
+            "2026-04-30T04:00:04.000Z"
+          ];
+          return () => timestamps[index++] ?? "2026-04-30T04:00:05.000Z";
+        })(),
+        stepHandler: async ({ definition, runState, step, attempt }) => {
+          const submitted = await connector.submit({
+            workflow: {
+              id: definition.id,
+              version: definition.schemaVersion
+            },
+            run: {
+              id: runState.run.runId
+            },
+            step: {
+              id: step.id,
+              attempt
+            },
+            idempotencyKey: `${runState.run.runId}:${step.id}:${attempt}`,
+            policyDecision: { decision: "allow" },
+            input: {
+              requestId: "fake-loop-run"
+            }
+          });
+
+          if (!submitted.ok) {
+            throw new Error(submitted.error.reason ?? submitted.error.message);
+          }
+
+          const status = await connector.status({ requestId: submitted.value.requestId });
+
+          if (!status.ok) {
+            throw new Error(status.error.reason ?? status.error.message);
+          }
+
+          expect(status.value).toMatchObject({
+            requestId: submitted.value.requestId,
+            status: "succeeded",
+            result: {
+              status: "succeeded",
+              summary: "Fake loop-like execution completed."
+            }
+          });
+        }
+      });
+
+      expect(result.run.status).toBe("succeeded");
+      expect(transport.submittedRunRequests).toHaveLength(1);
+      expect(transport.submittedRunRequests[0]).toMatchObject({
+        schemaVersion: "eip.run-request.v1",
+        id: "req_loop_fake_transport_demo_fake_loop_run_loop_like_executor_1",
+        mode: "validate"
+      });
+
+      const persisted = await readWorkflowRunState(statePath);
+      expect(persisted.events.map((event) => event.type)).toEqual([
+        "run.created",
+        "step.attempt.started",
+        "step.attempt.completed",
+        "run.completed"
+      ]);
+      expect(persisted.stepAttempts["loop-like-executor"]).toMatchObject([
+        {
+          attempt: 1,
+          status: "succeeded"
+        }
+      ]);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps malformed fake Ensen-loop EIP status output fail-closed", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: createFakeEnsenLoopEipExecutorTransport({
+        statusSnapshots: [
+          {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            correlationId: "corr_loop_eip_demo_run_loop_executor_step_1",
+            status: "completed",
+            observedAt: "2026-04-30T04:00:02.000Z"
+          }
+        ]
+      }),
+      now: () => "2026-04-30T04:00:00.000Z"
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        reason: "EIP RunStatusSnapshot id is malformed"
+      }
+    });
+  });
+
+  it("keeps malformed fake Ensen-loop EIP result output fail-closed", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: createFakeEnsenLoopEipExecutorTransport({
+        result: ({ requestId, request }) => ({
+          schemaVersion: "eip.run-result.v1",
+          id: `run_${requestId}`,
+          requestId,
+          correlationId: request?.correlationId ?? "corr_loop_eip_demo_run_loop_executor_step_1",
+          status: "succeeded"
+        })
+      }),
+      now: () => "2026-04-30T04:00:00.000Z"
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.status({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "status",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        reason: "EIP RunResult completedAt is malformed"
       }
     });
   });

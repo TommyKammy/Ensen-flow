@@ -197,7 +197,7 @@ export const createEnsenLoopEipExecutorConnector = (
       }
 
       const cancelled = await input.transport.cancelRunRequest(request);
-      const cancelValidation = validateCancelReceipt(cancelled);
+      const cancelValidation = validateCancelReceipt(cancelled, request.requestId);
 
       if (cancelValidation !== undefined) {
         return invalidRequest(connectorId, "cancel", cancelValidation.message, cancelValidation.reason);
@@ -414,14 +414,21 @@ const validateRunStatusSnapshot = (
 };
 
 const validateCancelReceipt = (
-  value: unknown
+  value: unknown,
+  expectedRequestId: string
 ): { message: string; reason: string } | undefined => {
   if (!isRecord(value)) {
     return failClosedReason("EIP cancel receipt must be an object");
   }
 
-  if (value.requestId !== undefined && typeof value.requestId !== "string") {
-    return failClosedReason("EIP cancel receipt requestId must be a string");
+  if (value.requestId !== undefined) {
+    if (typeof value.requestId !== "string") {
+      return failClosedReason("EIP cancel receipt requestId must be a string");
+    }
+
+    if (value.requestId !== expectedRequestId) {
+      return failClosedReason("EIP cancel receipt requestId does not match the submitted request");
+    }
   }
 
   if (typeof value.cancelled !== "boolean") {

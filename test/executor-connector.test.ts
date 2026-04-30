@@ -638,6 +638,49 @@ describe("Ensen-loop EIP executor connector", () => {
     });
   });
 
+  it("fails closed when an EIP cancel receipt belongs to a different request", async () => {
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          return {
+            schemaVersion: "eip.run-status.v1",
+            requestId: "req_loop_eip_demo_run_loop_executor_step_1",
+            status: "running"
+          };
+        },
+        getRunResult() {
+          throw new Error("result should not be fetched for a mismatched cancel receipt");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be fetched for a mismatched cancel receipt");
+        },
+        cancelRunRequest() {
+          return {
+            requestId: "req_other_loop_run",
+            cancelled: true
+          };
+        }
+      }
+    });
+    const submitted = await connector.submit(submitRequest);
+
+    if (!submitted.ok) {
+      throw new Error("submit should succeed");
+    }
+
+    expect(await connector.cancel({ requestId: submitted.value.requestId })).toMatchObject({
+      ok: false,
+      operation: "cancel",
+      error: {
+        code: "invalid-request",
+        reason: "EIP cancel receipt requestId does not match the submitted request"
+      }
+    });
+  });
+
   it("uses remote EIP payload validation instead of same-instance submit state", async () => {
     const observedStatusRequests: string[] = [];
     const transport = {

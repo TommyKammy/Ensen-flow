@@ -298,9 +298,11 @@ interface EipRunStatusSnapshotV1 {
 
 interface EipRunResultV1 {
   schemaVersion: "eip.run-result.v1";
+  id: string;
   requestId: string;
+  correlationId: string;
   status: "succeeded" | "failed" | "blocked" | "needs_review" | "cancelled";
-  completedAt?: string;
+  completedAt: string;
   verification?: {
     status?: string;
     summary?: string;
@@ -609,12 +611,20 @@ const validateRunResult = (
     return failClosedReason("EIP RunResult requestId does not match the submitted request");
   }
 
+  if (!isPrefixedId(value.id, "run")) {
+    return failClosedReason("EIP RunResult id is malformed");
+  }
+
+  if (!isCorrelationId(value.correlationId)) {
+    return failClosedReason("EIP RunResult correlationId is malformed");
+  }
+
   if (!isRunResultStatus(value.status)) {
     return failClosedReason("EIP RunResult status is unsupported or malformed");
   }
 
-  if (value.completedAt !== undefined && typeof value.completedAt !== "string") {
-    return failClosedReason("EIP RunResult completedAt must be a string");
+  if (!isIsoDateTimeUtc(value.completedAt)) {
+    return failClosedReason("EIP RunResult completedAt is malformed");
   }
 
   if (value.verification !== undefined) {

@@ -1963,7 +1963,7 @@ const isLocalEvidencePath = (value: string): boolean =>
 const isPortableLocalArtifactPath = (value: string): boolean =>
   value.length > 0 &&
   value.length <= 1000 &&
-  /^(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?![A-Za-z]:\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(
+  /^(?!~)(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?![A-Za-z]:\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(
     value
   );
 
@@ -1975,5 +1975,5 @@ const containsCredentialShapedValue = (value: string): boolean =>
   /(?:^|\b)(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key)\s*[:=]/i.test(
     value
   ) ||
-  /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)-[A-Za-z0-9_-]{8,}\b/.test(value) ||
+  /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)[-_][A-Za-z0-9_-]{8,}\b/.test(value) ||
   /-----BEGIN [A-Z ]*(?:PRIVATE KEY|TOKEN|SECRET)[A-Z ]*-----/.test(value);

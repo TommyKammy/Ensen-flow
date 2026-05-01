@@ -719,6 +719,32 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
       expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
     },
     {
+      name: "home-relative local artifact path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "aggregate-json",
+            path: "~/state/x-gate3/aggregate.json"
+          }
+        ]
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+    },
+    {
+      name: "user-home-relative local artifact path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "aggregate-json",
+            path: "~operator/state/x-gate3/aggregate.json"
+          }
+        ]
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+    },
+    {
       name: "credential-shaped local artifact value",
       aggregate: {
         ...createXGate3Aggregate(),
@@ -727,6 +753,36 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
             kind: "log",
             path: "state/x-gate3/log.txt",
             description: "token=sample-secret"
+          }
+        ]
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+    },
+    {
+      name: "underscore-delimited GitHub token artifact value",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "log",
+            path: "state/x-gate3/log.txt",
+            description: "ghp_sampletokenvalue"
+          }
+        ]
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+    },
+    {
+      name: "underscore-delimited GitHub fine-grained token artifact value",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "log",
+            path: "state/x-gate3/log.txt",
+            description: "github_pat_sampletokenvalue"
           }
         ]
       },

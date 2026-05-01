@@ -873,6 +873,12 @@ interface EnsenLoopXGate3LocalLaneSmokeAggregateV1 {
   evidenceBundleRef?: Record<string, unknown>;
 }
 
+interface XGate3LocalLaneEvidence {
+  localArtifacts: Array<Record<string, unknown>>;
+  localArtifactSemantics: "local-development-references-only";
+  productionEvidence: false;
+}
+
 type EnsenLoopSmokeAggregateV1 =
   | EnsenLoopXGate2SmokeAggregateV1
   | EnsenLoopXGate3LocalLaneSmokeAggregateV1;
@@ -1059,16 +1065,42 @@ const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResul
 
 const extractXGate3LocalLaneEvidence = (
   extensions: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined => {
+): XGate3LocalLaneEvidence | undefined => {
   const localLane = extensions?.["x-ensen-flow-local-lane"];
   if (!isRecord(localLane)) {
     return undefined;
   }
 
+  const unknownProperty = findUnknownProperty(localLane, [
+    "localArtifacts",
+    "localArtifactSemantics",
+    "productionEvidence"
+  ]);
+  if (unknownProperty !== undefined) {
+    return undefined;
+  }
+
+  if (
+    localLane.localArtifactSemantics !== "local-development-references-only" ||
+    localLane.productionEvidence !== false ||
+    !Array.isArray(localLane.localArtifacts) ||
+    localLane.localArtifacts.length === 0
+  ) {
+    return undefined;
+  }
+
+  const localArtifacts: Array<Record<string, unknown>> = [];
+  for (const artifact of localLane.localArtifacts) {
+    if (validateXGate3LocalArtifact(artifact, "x-ensen-flow-local-lane.localArtifacts[]")) {
+      return undefined;
+    }
+    localArtifacts.push(sanitizeXGate3LocalArtifact(artifact));
+  }
+
   return {
-    localArtifacts: localLane.localArtifacts,
-    localArtifactSemantics: localLane.localArtifactSemantics,
-    productionEvidence: localLane.productionEvidence
+    localArtifacts,
+    localArtifactSemantics: "local-development-references-only",
+    productionEvidence: false
   };
 };
 
@@ -1391,6 +1423,14 @@ const validateXGate3LocalArtifact = (
 
   return undefined;
 };
+
+const sanitizeXGate3LocalArtifact = (value: Record<string, unknown>): Record<string, unknown> => ({
+  kind: value.kind,
+  path: value.path,
+  ...(value.contentType === undefined ? {} : { contentType: value.contentType }),
+  ...(value.description === undefined ? {} : { description: value.description }),
+  ...(value.checksum === undefined ? {} : { checksum: value.checksum })
+});
 
 const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {
   if (!isRecord(value)) {

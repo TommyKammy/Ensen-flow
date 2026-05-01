@@ -383,6 +383,44 @@ describe("sequential workflow runner", () => {
     });
   });
 
+  it("fails the step when a handler returns a malformed non-void result", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-malformed-handler"
+      },
+      now: (() => {
+        let index = 0;
+        const timestamps = [
+          "2026-04-29T00:05:00.000Z",
+          "2026-04-29T00:05:01.000Z",
+          "2026-04-29T00:05:02.000Z",
+          "2026-04-29T00:05:03.000Z",
+          "2026-04-29T00:05:04.000Z"
+        ];
+        return () => timestamps[index++] ?? "2026-04-29T00:05:05.000Z";
+      })(),
+      stepHandler: () => ({}) as never
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "stepHandler must return an ExecutorConnectorStatusSnapshot or { executor }"
+        }
+      }
+    ]);
+  });
+
   it.each([
     {
       executorStatus: "succeeded",

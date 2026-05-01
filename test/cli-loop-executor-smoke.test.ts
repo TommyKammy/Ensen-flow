@@ -843,6 +843,67 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
 
   it.each([
     {
+      name: "production evidence claim",
+      extension: {
+        localArtifacts: createXGate3Aggregate().localArtifacts,
+        localArtifactSemantics: "local-development-references-only",
+        productionEvidence: true
+      }
+    },
+    {
+      name: "unsupported local artifact field",
+      extension: {
+        localArtifacts: [
+          {
+            kind: "aggregate-json",
+            path: "state/x-gate3/aggregate.json",
+            durableEvidenceArchive: true
+          }
+        ],
+        localArtifactSemantics: "local-development-references-only",
+        productionEvidence: false
+      }
+    },
+    {
+      name: "unsupported local lane field",
+      extension: {
+        localArtifacts: createXGate3Aggregate().localArtifacts,
+        localArtifactSemantics: "local-development-references-only",
+        productionEvidence: false,
+        providerRan: true
+      }
+    }
+  ])("does not surface unsafe X-Gate 3 local lane evidence from $name", async ({
+    extension
+  }) => {
+    const transport = createFakeTransportWithResultExtension(extension);
+    const connector = createEnsenLoopEipExecutorConnector({ transport });
+    const submitted = await connector.submit(createSmokeSubmitRequest());
+    if (!submitted.ok) {
+      throw new Error(submitted.error.reason ?? submitted.error.message);
+    }
+
+    const result = await connector.status({ requestId: submitted.value.requestId });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        result: {
+          evidence: {
+            verification: {
+              summary: "Loop X-Gate 3 local fake lane succeeded."
+            }
+          }
+        }
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("localArtifacts");
+    expect(JSON.stringify(result)).not.toContain("productionEvidence");
+    expect(JSON.stringify(result)).not.toContain("providerRan");
+  });
+
+  it.each([
+    {
       name: "protocol gap for unsupported successful aggregate shape",
       scriptBody:
         "process.stdout.write(JSON.stringify({ schemaVersion: 'ensen-loop.x-gate3-local-lane-smoke.v2' }));",
@@ -1257,3 +1318,74 @@ const createXGate3Aggregate = () => ({
     }
   ]
 });
+
+const createSmokeSubmitRequest = (): ExecutorSubmitRequest => ({
+  workflow: {
+    id: "cli-loop-smoke",
+    version: "flow.workflow.v1"
+  },
+  run: {
+    id: "cli-loop-smoke"
+  },
+  step: {
+    id: "loop-dry-run",
+    attempt: 1
+  },
+  idempotencyKey: "cli-loop-smoke-0001",
+  policyDecision: { decision: "allow" },
+  source: createSmokeRunRequest().source,
+  requestedBy: createSmokeRunRequest().requestedBy,
+  workItem: createSmokeRunRequest().workItem
+});
+
+const createFakeTransportWithResultExtension = (extension: Record<string, unknown>) => {
+  const requestIds: string[] = [];
+  const submittedRunRequests: EipRunRequestV1[] = [];
+  return {
+    submittedRunRequests,
+    submitRunRequest(request: EipRunRequestV1) {
+      requestIds.push(request.id);
+      submittedRunRequests.push(request);
+      return {
+        requestId: request.id,
+        acceptedAt: "2026-05-01T04:00:01.000Z"
+      };
+    },
+    getRunStatusSnapshot({ requestId }: { requestId: string }) {
+      if (!requestIds.includes(requestId)) {
+        throw new Error("unknown request");
+      }
+      return {
+        schemaVersion: "eip.run-status.v1",
+        id: "sts_cli_loop_xgate3_extension",
+        requestId,
+        correlationId: "corr_cli_loop_smoke",
+        status: "completed",
+        observedAt: "2026-05-01T04:00:02.000Z"
+      };
+    },
+    getRunResult({ requestId }: { requestId: string }) {
+      if (!requestIds.includes(requestId)) {
+        throw new Error("unknown request");
+      }
+      return {
+        schemaVersion: "eip.run-result.v1",
+        id: "run_cli_loop_xgate3_extension",
+        requestId,
+        correlationId: "corr_cli_loop_smoke",
+        status: "succeeded",
+        completedAt: "2026-05-01T04:00:03.000Z",
+        verification: {
+          status: "passed",
+          summary: "Loop X-Gate 3 local fake lane succeeded."
+        },
+        extensions: {
+          "x-ensen-flow-local-lane": extension
+        }
+      };
+    },
+    getEvidenceBundleRef() {
+      throw new Error("evidence should not be fetched");
+    }
+  };
+};

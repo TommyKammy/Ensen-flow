@@ -596,6 +596,37 @@ describe("workflow run JSONL state", () => {
     );
   });
 
+  it("rejects result metadata on started step attempts before appending", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-started-result",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await expect(
+      appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.started",
+        runId: "run-started-result",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:02.000Z",
+        result: { ignored: true }
+      })
+    ).rejects.toThrow(
+      "workflow run state line 1: result is only allowed on terminal step attempt events"
+    );
+
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.events.map((event) => event.type)).toEqual(["run.created"]);
+  });
+
   it("fails closed on duplicate terminal step attempt transitions", async () => {
     const statePath = await createTempStatePath();
     await writeFile(

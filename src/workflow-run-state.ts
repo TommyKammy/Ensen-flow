@@ -439,6 +439,9 @@ const validateWorkflowRunEvent = (
   }
 
   if ("result" in value) {
+    if (eventType === "step.attempt.started") {
+      throw stateError(lineNumber, "result is only allowed on terminal step attempt events");
+    }
     validateResultMetadata(value.result, lineNumber);
   }
 

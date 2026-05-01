@@ -53,7 +53,7 @@ export type WorkflowStepHandlerResult =
   | void
   | ExecutorConnectorStatusSnapshot
   | {
-      executor?: ExecutorConnectorStatusSnapshot;
+      executor: ExecutorConnectorStatusSnapshot;
     };
 
 export type WorkflowStepHandler = (
@@ -290,7 +290,7 @@ const normalizeStepHandlerResult = (
     return { executor: result.executor };
   }
 
-  return undefined;
+  throw new Error("stepHandler must return an ExecutorConnectorStatusSnapshot or { executor }");
 };
 
 const errorStepResult = (error: unknown): WorkflowStepAttemptResultMetadata | undefined =>

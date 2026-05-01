@@ -5,6 +5,13 @@ import {
 
 const WORKFLOW_SCHEMA_VERSION = "flow.workflow.v1";
 
+const CRON_FIELD_SPECS = [
+  { name: "minute", min: 0, max: 59 },
+  { name: "hour", min: 0, max: 23 },
+  { name: "day-of-month", min: 1, max: 31 },
+  { name: "month", min: 1, max: 12 },
+  { name: "day-of-week", min: 0, max: 6 }
+] as const;
 const TRIGGER_TYPES = new Set(["manual", "schedule", "webhook"]);
 const ACTION_TYPES = new Set(["local", "approval", "notification"]);
 const IDEMPOTENCY_KEY_SOURCES = new Set(["input", "workflow", "static"]);
@@ -150,6 +157,27 @@ export interface WorkflowDefinitionValidationResult {
 export const workflowDefinitionSchemaVersion: WorkflowSchemaVersion =
   WORKFLOW_SCHEMA_VERSION;
 
+export const isValidScheduleCronExpression = (value: string): boolean => {
+  const fields = value.trim().split(/\s+/);
+  if (fields.length !== CRON_FIELD_SPECS.length) {
+    return false;
+  }
+
+  return fields.every((field, index) => {
+    if (field === "*") {
+      return true;
+    }
+
+    if (!/^\d+$/.test(field)) {
+      return false;
+    }
+
+    const numericField = Number(field);
+    const spec = CRON_FIELD_SPECS[index];
+    return Number.isInteger(numericField) && numericField >= spec.min && numericField <= spec.max;
+  });
+};
+
 export const validateWorkflowDefinition = (
   value: unknown
 ): WorkflowDefinitionValidationResult => {
@@ -209,6 +237,16 @@ const validateTrigger = (
 
   if (triggerType === "schedule") {
     requireNonEmptyString(value, "cron", "trigger.cron", errors);
+    if (
+      typeof value.cron === "string" &&
+      value.cron.trim() !== "" &&
+      !isValidScheduleCronExpression(value.cron)
+    ) {
+      errors.push({
+        path: "trigger.cron",
+        message: "schedule cron must use five UTC minute fields with * or numeric values"
+      });
+    }
   }
 
   if (triggerType === "webhook") {

@@ -27,6 +27,15 @@ persistence behavior, executor connector configuration, or real Slack, Teams,
 ERPNext, GitHub, or other connector behavior. Those concerns are deferred to
 later Phase 1 issues.
 
+Schedule triggers are intentionally small. The schema accepts only a local
+`schedule` trigger with a `cron` string containing five UTC minute fields. Each
+field must be either `*` or a numeric value in the field range. The runtime
+helper `evaluateScheduleTrigger` can evaluate one supplied `scheduledFor`
+timestamp against that cron expression in local tests, derive a deterministic
+run ID and JSONL state path, and preserve trigger idempotency. This is not a
+long-running scheduler daemon, cron service integration, cloud scheduler,
+external calendar integration, or production time-zone policy.
+
 Runner audit output is intentionally separate from the workflow definition
 schema. The Phase 1 runner writes an internal neutral JSONL audit shape for
 local lifecycle activity only; a formal mapping to EIP AuditEvent is deferred to
@@ -72,6 +81,32 @@ runtime dispatch implementation.
         "backoff": {
           "strategy": "none"
         }
+      }
+    }
+  ]
+}
+```
+
+A bounded schedule trigger uses the same workflow shape with a schedule trigger:
+
+```json
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "local-schedule-demo",
+  "trigger": {
+    "type": "schedule",
+    "cron": "0 9 * * *",
+    "idempotencyKey": {
+      "source": "workflow",
+      "template": "{workflow.id}:{trigger.type}:{trigger.scheduledFor}"
+    }
+  },
+  "steps": [
+    {
+      "id": "scheduled-step",
+      "action": {
+        "type": "local",
+        "name": "scheduled_noop"
       }
     }
   ]

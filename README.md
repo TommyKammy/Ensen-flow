@@ -7,8 +7,9 @@ A lightweight workflow orchestration engine.
 This repository is in the Phase 1 baseline stage. The current package exposes a
 minimal TypeScript scaffold plus the initial standalone workflow definition
 schema, append-only JSONL workflow run state helpers, a local sequential runner,
-and neutral audit JSONL events. It does not implement executor connectors,
-Ensen-loop integration, ERPNext behavior, or Pharma/GxP workflow packs yet.
+neutral audit JSONL events, and a bounded local schedule trigger evaluator. It
+does not implement executor connectors, Ensen-loop integration, ERPNext
+behavior, or Pharma/GxP workflow packs yet.
 
 Use the same commands locally that CI runs:
 
@@ -50,6 +51,16 @@ The initial standalone workflow definition schema is documented in
 It validates versioned workflow definitions, stable workflow and step IDs,
 trigger shape, dependencies, retry policy, neutral actions, and idempotency key
 semantics without contacting Ensen-loop or external executor connectors.
+
+Schedule triggers are a local definition and test helper boundary only. A
+workflow may declare `trigger.type: "schedule"` with a five-field UTC cron shape
+using `*` or numeric values, and callers may deterministically evaluate one
+candidate scheduled instant with `evaluateScheduleTrigger`. The helper derives a
+stable run ID and JSONL state path from the scheduled instant, so repeating the
+same evaluation returns the existing terminal run instead of creating an
+unexpected duplicate. Ensen-flow does not run a background scheduler daemon, cron
+service integration, cloud scheduler, external calendar integration, or
+production time-zone policy.
 
 ## Workflow Run JSONL State
 

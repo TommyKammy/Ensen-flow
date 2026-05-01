@@ -38,6 +38,9 @@ authority, and no premature compliance claims.
 - `docs/x-gate2-loop-flow-smoke-runbook.md`: local X-Gate 2 loop-flow smoke
   runbook, expected artifacts, failure classification, and non-production
   boundaries.
+- `docs/x-gate3-flow-caller-boundary-runbook.md`: Flow-owned X-Gate 3 caller
+  boundary, Loop local fake lane command shape, stdout contract, failure
+  routing, and non-production limits.
 
 ## Workflow Definition Schema
 

@@ -40,7 +40,8 @@ authority, and no premature compliance claims.
   boundaries.
 - `docs/x-gate3-flow-caller-boundary-runbook.md`: Flow-owned X-Gate 3 caller
   boundary, Loop local fake lane command shape, stdout contract, failure
-  routing, and non-production limits.
+  routing, focused Flow smoke coverage, local cleanup limits, and
+  non-production limits.
 
 ## Workflow Definition Schema
 

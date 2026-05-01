@@ -45,6 +45,23 @@ Docs, tests, fixtures, and issue output must keep these as placeholders or
 repo-relative paths; they must not publish workstation-local absolute paths,
 secrets, customer data, or production evidence locations.
 
+For a real sibling Loop checkout, use environment variables or placeholders
+rather than durable host paths in published notes:
+
+```sh
+LOOP_ROOT=<codex-supervisor-root-or-loop-checkout>
+FLOW_SMOKE_ROOT=<temporary-flow-x-gate3-smoke-root>
+node "$LOOP_ROOT/dist/index.js" x-gate3-smoke <run-request-json-file> --workspace-root "$FLOW_SMOKE_ROOT/workspace" --state-root "$FLOW_SMOKE_ROOT/state"
+```
+
+The Flow-owned local smoke test creates its own temporary RunRequest input and
+invokes an X-Gate 3-shaped local fake lane process. It is the required focused
+test for this repository:
+
+```sh
+npm test -- test/x-gate3-flow-smoke.test.ts
+```
+
 ## Stdout Contract
 
 The command should write one JSON aggregate to process stdout. Flow may consume
@@ -80,6 +97,13 @@ Flow must not publish raw secrets, access tokens, customer records, provider
 payloads, real repository data, real review text, ERPNext records, or Pharma/GxP
 evidence as part of X-Gate 3 smoke output.
 
+Cleanup is limited to the temporary smoke root created for a single local run,
+for example `<temporary-flow-x-gate3-smoke-root>/workspace`,
+`<temporary-flow-x-gate3-smoke-root>/state`, and temporary RunRequest files.
+Do not delete repository checkouts, supervisor state, customer data,
+production evidence paths, shared caches, or any path that was not created for
+the current smoke run.
+
 ## Failure Routing
 
 | Failure class | Route follow-up to | Use when |
@@ -99,12 +123,13 @@ assumption.
 Run the repo-owned documentation contract test:
 
 ```sh
+npm test -- test/x-gate3-flow-smoke.test.ts
 npm test -- test/x-gate3-flow-runbook.test.ts
 ```
 
-Before marking the runbook complete, also inspect the docs diff for boundary
-wording and placeholder-only paths. Full local verification should continue to
-use the repo-owned commands:
+Before marking the runbook complete, inspect the docs diff for boundary wording,
+placeholder-only paths, cleanup limits, and Protocol #28 routing language. Full
+local verification should continue to use the repo-owned commands:
 
 ```sh
 npm run build
@@ -115,14 +140,17 @@ npm test
 
 X-Gate 3 documentation can be marked ready when all of the following are true:
 
+- `npm test -- test/x-gate3-flow-smoke.test.ts` passes and proves the Flow
+  runner plus connector can exercise the Loop-shaped local fake lane boundary;
 - the Flow runbook describes protocol-shaped input and process stdout output;
 - README or docs navigation links to this runbook;
-- the command shape uses placeholders only;
+- the command shape uses placeholders or documented environment variables only;
 - expected stdout fields include aggregate schema version, boundary flags,
   RunStatusSnapshot, RunResult, and local artifact references;
 - failure routing covers `protocol-gap`, `loop-gap`, and `flow-gap`;
 - concrete protocol contract ambiguity routes to TommyKammy/Ensen-protocol#28;
 - the wording preserves the Ensen-flow repository boundary and forbids shared
   Ensen-loop implementation imports;
+- cleanup is limited to the temporary smoke root created for the current run;
 - the smoke remains local development evidence only, with no production
-  automation or compliance evidence claim.
+  automation, external mutation, or compliance evidence claim.

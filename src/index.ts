@@ -31,6 +31,11 @@ export {
 } from "./executor-connector.js";
 
 export {
+  createFakeHttpNotificationTransport,
+  createHttpNotificationConnector
+} from "./http-notification-connector.js";
+
+export {
   eipVersionBoundary,
   isSupportedEipProtocolVersion
 } from "./eip-version.js";
@@ -102,6 +107,23 @@ export type {
   ExecutorPolicyDecisionPayload,
   ExecutorSubmitRequest
 } from "./executor-connector.js";
+
+export type {
+  CreateFakeHttpNotificationTransportInput,
+  CreateHttpNotificationConnectorInput,
+  FakeHttpNotificationTransport,
+  HttpNotificationCapabilities,
+  HttpNotificationConnector,
+  HttpNotificationMethod,
+  HttpNotificationOutcome,
+  HttpNotificationOutcomeStatus,
+  HttpNotificationReceipt,
+  HttpNotificationSubmitRequest,
+  HttpNotificationSubmitResult,
+  HttpNotificationTarget,
+  HttpNotificationTransport,
+  HttpNotificationTransportDelivery
+} from "./http-notification-connector.js";
 
 export type { EipVersionBoundary } from "./eip-version.js";
 

@@ -33,6 +33,13 @@ describe("workflow definition schema", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("accepts a placeholder-only HTTP notification workflow fixture", () => {
+    const result = validateWorkflowDefinition(readFixture("http-notification.valid.json"));
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it("accepts the supported optional EIP protocol version", () => {
     const workflow = readMutableWorkflowFixture();
     workflow.protocolVersion = "0.1.0";

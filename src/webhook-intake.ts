@@ -312,7 +312,9 @@ const assertExistingWebhookInputMatches = async (
     return;
   }
 
-  const existingFingerprint = readStoredWebhookInputFingerprint(existingState);
+  const existingFingerprint =
+    readStoredWebhookInputFingerprint(existingState) ??
+    deriveLegacyWebhookInputFingerprint(existingState);
   if (existingFingerprint !== inputFingerprint) {
     throw new WebhookIntakeRejectedError(
       "webhook requestId reuse must keep normalized input unchanged"
@@ -346,6 +348,59 @@ const readStoredWebhookInputFingerprint = (state: WorkflowRunState): string | un
   }
 
   return typeof webhook.inputFingerprint === "string" ? webhook.inputFingerprint : undefined;
+};
+
+const deriveLegacyWebhookInputFingerprint = (
+  state: WorkflowRunState
+): string | undefined => {
+  const triggerContext = state.run.trigger.context;
+  if (!isRecord(triggerContext) || !isRecord(triggerContext.webhook)) {
+    return undefined;
+  }
+
+  const webhook = triggerContext.webhook;
+  const requestId = triggerContext.requestId;
+  const headers = readLegacyWebhookHeaders(webhook.headers);
+  if (
+    typeof requestId !== "string" ||
+    typeof webhook.path !== "string" ||
+    typeof webhook.receivedAt !== "string" ||
+    !isRecord(webhook.payload) ||
+    headers === null
+  ) {
+    return undefined;
+  }
+
+  return createWebhookInputFingerprint({
+    schemaVersion: WEBHOOK_INPUT_SCHEMA_VERSION,
+    requestId,
+    path: webhook.path,
+    receivedAt: webhook.receivedAt,
+    ...(headers === undefined ? {} : { headers }),
+    payload: webhook.payload
+  });
+};
+
+const readLegacyWebhookHeaders = (
+  value: unknown
+): Record<string, string> | undefined | null => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(value)) {
+    if (typeof headerValue !== "string") {
+      return null;
+    }
+    headers[key] = headerValue;
+  }
+
+  return headers;
 };
 
 const createWebhookInputFingerprint = (input: WebhookInput): string =>

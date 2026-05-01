@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -45,6 +45,23 @@ const readAuditEvents = async (auditPath: string): Promise<Array<Record<string, 
     .trimEnd()
     .split("\n")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const removePersistedWebhookInputFingerprint = async (statePath: string): Promise<void> => {
+  const events = (await readFile(statePath, "utf8"))
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const trigger = events[0]?.trigger;
+  if (!isRecord(trigger) || !isRecord(trigger.context) || !isRecord(trigger.context.webhook)) {
+    throw new Error("fixture state must include webhook trigger context");
+  }
+
+  delete trigger.context.webhook.inputFingerprint;
+  await writeFile(statePath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -137,6 +154,52 @@ describe("webhook intake boundary", () => {
       id: `audit.${expectedRunId}.000001`,
       run: { id: expectedRunId }
     });
+  });
+
+  it("replays legacy webhook run state without a stored fingerprint when normalized input is unchanged", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const input = createWebhookInput();
+
+    const first = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input
+    });
+    const statePath = join(stateRoot, `${first.run.runId}.jsonl`);
+    await removePersistedWebhookInputFingerprint(statePath);
+    const legacyState = await readWorkflowRunState(statePath);
+    const auditBeforeReplay = await readAuditEvents(auditPath);
+
+    const replay = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input: createWebhookInput()
+    });
+
+    expect(replay).toEqual(legacyState);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    expect(await readWorkflowRunState(statePath)).toEqual(legacyState);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
   });
 
   it("rejects reused requestIds when normalized webhook payload changes without writing audit events", async () => {

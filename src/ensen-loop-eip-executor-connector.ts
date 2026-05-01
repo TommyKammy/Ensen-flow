@@ -869,8 +869,14 @@ interface EnsenLoopXGate3LocalLaneSmokeAggregateV1 {
   writesProductionEvidenceArchive: false;
   statusSnapshot: EipRunStatusSnapshotV1;
   runResult: EipRunResultV1;
-  localArtifacts: EnsenLoopXGate3LocalArtifactsV1;
+  localArtifacts: EnsenLoopXGate3RawLocalArtifactsV1;
   evidenceBundleRef?: Record<string, unknown>;
+}
+
+interface EnsenLoopXGate3RawLocalArtifactsV1 {
+  laneRunId: string;
+  stateFile: string;
+  evidenceMetadata?: string[];
 }
 
 interface EnsenLoopXGate3LocalArtifactsV1 {
@@ -1061,9 +1067,7 @@ const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResul
     extensions: {
       ...(aggregate.runResult.extensions ?? {}),
       "x-ensen-flow-local-lane": {
-        localArtifacts: sanitizeXGate3LocalArtifacts(
-          aggregate.localArtifacts as unknown as Record<string, unknown>
-        ),
+        localArtifacts: sanitizeXGate3LocalArtifacts(aggregate.localArtifacts),
         localArtifactSemantics: "local-development-references-only",
         productionEvidence: false
       }
@@ -1104,10 +1108,9 @@ const extractXGate3LocalLaneEvidence = (
     return undefined;
   }
 
+  const localArtifacts = localLane.localArtifacts as EnsenLoopXGate3RawLocalArtifactsV1;
   return {
-    localArtifacts: sanitizeXGate3LocalArtifacts(
-      localLane.localArtifacts as Record<string, unknown>
-    ),
+    localArtifacts: sanitizeXGate3LocalArtifacts(localArtifacts),
     localArtifactSemantics: "local-development-references-only",
     productionEvidence: false
   };
@@ -1399,11 +1402,11 @@ const validateXGate3LocalArtifacts = (
 };
 
 const sanitizeXGate3LocalArtifacts = (
-  value: Record<string, unknown>
+  value: EnsenLoopXGate3RawLocalArtifactsV1
 ): EnsenLoopXGate3LocalArtifactsV1 => ({
-  laneRunId: value.laneRunId as string,
-  stateFile: value.stateFile as string,
-  evidenceMetadata: [...((value.evidenceMetadata as string[] | undefined) ?? [])]
+  laneRunId: value.laneRunId,
+  stateFile: value.stateFile,
+  evidenceMetadata: [...(value.evidenceMetadata ?? [])]
 });
 
 const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {

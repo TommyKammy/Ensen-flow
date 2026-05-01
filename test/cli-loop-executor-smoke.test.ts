@@ -622,7 +622,21 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
           status: status === "succeeded" ? "succeeded" : status,
           result: {
             status,
-            summary
+            summary,
+            evidence: {
+              localArtifacts: [
+                {
+                  kind: "aggregate-json",
+                  path: "state/x-gate3/aggregate.json"
+                },
+                {
+                  kind: "log",
+                  path: "state/x-gate3/loop.log"
+                }
+              ],
+              localArtifactSemantics: "local-development-references-only",
+              productionEvidence: false
+            }
           }
         }
       });

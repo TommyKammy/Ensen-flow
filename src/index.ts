@@ -126,6 +126,7 @@ export type {
   WorkflowRunTerminalState,
   WorkflowRunTriggerContext,
   WorkflowStepAttemptEvent,
+  WorkflowStepAttemptResultMetadata,
   WorkflowStepAttemptState
 } from "./workflow-run-state.js";
 
@@ -155,7 +156,8 @@ export type {
 export type {
   RunWorkflowInput,
   WorkflowStepHandler,
-  WorkflowStepHandlerInput
+  WorkflowStepHandlerInput,
+  WorkflowStepHandlerResult
 } from "./workflow-runner.js";
 
 export type {

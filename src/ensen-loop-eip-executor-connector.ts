@@ -171,7 +171,9 @@ export const createCliEnsenLoopEipExecutorTransport = (
       return requireSmokeAggregate(smokeAggregates, request.requestId, "status").statusSnapshot;
     },
     getRunResult(request: { requestId: string }) {
-      return requireSmokeAggregate(smokeAggregates, request.requestId, "result").runResult;
+      return enrichSmokeRunResult(
+        requireSmokeAggregate(smokeAggregates, request.requestId, "result")
+      );
     },
     getEvidenceBundleRef(request: { requestId: string }) {
       return requireSmokeAggregate(smokeAggregates, request.requestId, "evidence").evidenceBundleRef;
@@ -290,7 +292,7 @@ export const createEnsenLoopEipExecutorConnector = (
       const status = snapshot as EipRunStatusSnapshotV1;
       const mappedStatus = mapRunStatus(status.status);
 
-      if (status.status === "completed") {
+      if (hasTerminalRunResult(status.status)) {
         const result = await input.transport.getRunResult(request);
         const resultVersion = requireSchemaVersion(result, "eip.run-result.v1", "RunResult");
 
@@ -840,6 +842,7 @@ interface EipRunResultV1 {
   errors?: unknown[];
   warnings?: unknown[];
   metrics?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
 }
 
 interface EnsenLoopXGate2SmokeAggregateV1 {
@@ -943,17 +946,26 @@ const mapRunStatus = (status: EipRunStatusSnapshotV1["status"]): ExecutorConnect
   }
 };
 
+const hasTerminalRunResult = (status: EipRunStatusSnapshotV1["status"]): boolean =>
+  status === "completed" ||
+  status === "failed" ||
+  status === "blocked" ||
+  status === "cancelled";
+
 const mapRunResultToStatusSnapshot = (
   result: EipRunResultV1,
   observedAt?: string
 ): ExecutorConnectorStatusSnapshot => {
   const resultStatus = mapRunResultStatus(result.status);
   const summary = result.verification?.summary;
+  const localLaneEvidence = extractXGate3LocalLaneEvidence(result.extensions);
   const evidence = {
+    ...(result.verification === undefined ? {} : { verification: result.verification }),
     ...(result.evidenceBundles === undefined ? {} : { evidenceBundles: result.evidenceBundles }),
     ...(result.errors === undefined ? {} : { errors: result.errors }),
     ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
-    ...(result.metrics === undefined ? {} : { metrics: result.metrics })
+    ...(result.metrics === undefined ? {} : { metrics: result.metrics }),
+    ...(localLaneEvidence === undefined ? {} : localLaneEvidence)
   };
 
   return {
@@ -1025,6 +1037,39 @@ const validateRunStatusSnapshot = (
   }
 
   return undefined;
+};
+
+const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResultV1 => {
+  if (aggregate.schemaVersion !== "ensen-loop.x-gate3-local-lane-smoke.v1") {
+    return aggregate.runResult;
+  }
+
+  return {
+    ...aggregate.runResult,
+    extensions: {
+      ...(aggregate.runResult.extensions ?? {}),
+      "x-ensen-flow-local-lane": {
+        localArtifacts: aggregate.localArtifacts,
+        localArtifactSemantics: "local-development-references-only",
+        productionEvidence: false
+      }
+    }
+  };
+};
+
+const extractXGate3LocalLaneEvidence = (
+  extensions: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined => {
+  const localLane = extensions?.["x-ensen-flow-local-lane"];
+  if (!isRecord(localLane)) {
+    return undefined;
+  }
+
+  return {
+    localArtifacts: localLane.localArtifacts,
+    localArtifactSemantics: localLane.localArtifactSemantics,
+    productionEvidence: localLane.productionEvidence
+  };
 };
 
 const validateSmokeAggregate = (
@@ -1544,7 +1589,7 @@ const validateRunResult = (
     return failClosedReason("EIP RunResult metrics must be an object");
   }
 
-  return undefined;
+  return validateExtensionMap(value.extensions, "EIP RunResult extensions");
 };
 
 const validateEvidenceBundleRef = (

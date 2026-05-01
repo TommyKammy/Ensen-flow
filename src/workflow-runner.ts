@@ -8,7 +8,12 @@ import {
 import { createLocalAuditEventWriter } from "./audit-event-writer.js";
 import type { NeutralAuditEventWriter } from "./audit-event-writer.js";
 import type {
+  ExecutorConnectorStatusSnapshot,
+  ExecutorConnectorExecutionStatus
+} from "./executor-connector.js";
+import type {
   WorkflowRunIdempotencyMetadata,
+  WorkflowStepAttemptResultMetadata,
   WorkflowRunState
 } from "./workflow-run-state.js";
 import {
@@ -44,7 +49,20 @@ export interface WorkflowStepHandlerInput {
   runState: WorkflowRunState;
 }
 
-export type WorkflowStepHandler = (input: WorkflowStepHandlerInput) => Promise<void> | void;
+export type WorkflowStepHandlerResult =
+  | void
+  | ExecutorConnectorStatusSnapshot
+  | {
+      executor?: ExecutorConnectorStatusSnapshot;
+    };
+
+export type WorkflowStepHandler = (
+  input: WorkflowStepHandlerInput
+) => Promise<WorkflowStepHandlerResult> | WorkflowStepHandlerResult;
+
+interface NormalizedWorkflowStepHandlerResult extends WorkflowStepAttemptResultMetadata {
+  executor: ExecutorConnectorStatusSnapshot;
+}
 
 export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunState> => {
   assertSupportedWorkflowEipProtocolVersion(input.definition);
@@ -130,13 +148,25 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       });
 
       try {
-        await stepHandler({
-          definition: input.definition,
-          step,
-          attempt,
-          triggerContext,
-          runState: await readWorkflowRunState(input.statePath)
-        });
+        const stepResult = normalizeStepHandlerResult(
+          await stepHandler({
+            definition: input.definition,
+            step,
+            attempt,
+            triggerContext,
+            runState: await readWorkflowRunState(input.statePath)
+          })
+        );
+
+        if (
+          stepResult?.executor !== undefined &&
+          stepResult.executor.status !== "succeeded"
+        ) {
+          throw new WorkflowStepOutcomeError(
+            executorFailureReason(stepResult.executor),
+            stepResult
+          );
+        }
 
         const completedAt = now();
         await appendWorkflowRunEvent(input.statePath, {
@@ -144,7 +174,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           runId,
           stepId: step.id,
           attempt,
-          occurredAt: completedAt
+          occurredAt: completedAt,
+          ...(stepResult === undefined ? {} : { result: stepResult })
         });
         await writeStepAuditEvent(auditWriter, {
           type: "step.completed",
@@ -155,6 +186,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         });
         break;
       } catch (error) {
+        const stepResult = errorStepResult(error);
         const retryable = attempt < retryPolicy.maxAttempts;
         const failedAt = now();
         const nextAttemptAt = retryable
@@ -170,7 +202,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             retryable,
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
             reason: errorReason(error)
-          }
+          },
+          ...(stepResult === undefined ? {} : { result: stepResult })
         });
         await writeStepAuditEvent(auditWriter, {
           type: "step.failed",
@@ -231,6 +264,72 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
   return readWorkflowRunState(input.statePath);
 };
+
+class WorkflowStepOutcomeError extends Error {
+  readonly result: WorkflowStepAttemptResultMetadata;
+
+  constructor(message: string, result: WorkflowStepAttemptResultMetadata) {
+    super(message);
+    this.name = "WorkflowStepOutcomeError";
+    this.result = result;
+  }
+}
+
+const normalizeStepHandlerResult = (
+  result: WorkflowStepHandlerResult
+): NormalizedWorkflowStepHandlerResult | undefined => {
+  if (result === undefined) {
+    return undefined;
+  }
+
+  if (isExecutorStatusSnapshot(result)) {
+    return { executor: result };
+  }
+
+  if (isRecord(result) && isExecutorStatusSnapshot(result.executor)) {
+    return { executor: result.executor };
+  }
+
+  return undefined;
+};
+
+const errorStepResult = (error: unknown): WorkflowStepAttemptResultMetadata | undefined =>
+  error instanceof WorkflowStepOutcomeError ? error.result : undefined;
+
+const executorFailureReason = (executor: ExecutorConnectorStatusSnapshot): string => {
+  const resultSummary = executor.result?.summary;
+  if (resultSummary !== undefined && resultSummary.trim() !== "") {
+    return resultSummary;
+  }
+
+  return `executor status ${executor.status} did not complete successfully`;
+};
+
+const isExecutorStatusSnapshot = (
+  value: unknown
+): value is ExecutorConnectorStatusSnapshot => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.requestId === "string" &&
+    typeof value.status === "string" &&
+    isExecutorTerminalOrProgressStatus(value.status)
+  );
+};
+
+const isExecutorTerminalOrProgressStatus = (
+  value: string
+): value is ExecutorConnectorExecutionStatus =>
+  value === "accepted" ||
+  value === "running" ||
+  value === "succeeded" ||
+  value === "failed" ||
+  value === "cancelled" ||
+  value === "approval-required" ||
+  value === "blocked" ||
+  value === "needs-review";
 
 export const loadWorkflowDefinitionFile = async (
   definitionPath: string

@@ -38,6 +38,9 @@ authority, and no premature compliance claims.
 
 - `docs/mission.md`: Ensen-flow mission and development charter short form.
 - `docs/workflow-definition.md`: Phase 1 workflow definition schema boundary.
+- `docs/connector-capability-matrix.md`: Phase 4 connector capability matrix
+  covering schedule, webhook, HTTP notification, local file, and executor
+  connector surfaces, including fake/local-only support and deferred boundaries.
 - `docs/file-connector.md`: local file connector safe-root boundary,
   idempotency behavior, cleanup ownership, and non-goals.
 - `docs/x-gate2-loop-flow-smoke-runbook.md`: local X-Gate 2 loop-flow smoke

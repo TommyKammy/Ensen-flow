@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "flow.webhook.input.v1",
+  "requestId": "webhook-001",
+  "path": "/hooks/local-demo",
+  "receivedAt": "2026-05-02T01:00:00.000Z",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "payload": {
+    "eventType": "local-demo.created",
+    "subject": "placeholder-subject"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "local-webhook-demo",
+  "trigger": {
+    "type": "webhook",
+    "path": "/hooks/local-demo",
+    "idempotencyKey": {
+      "source": "input",
+      "field": "requestId",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "record-webhook",
+      "action": {
+        "type": "local",
+        "name": "record_webhook"
+      }
+    }
+  ]
+}

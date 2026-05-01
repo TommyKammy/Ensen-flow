@@ -145,6 +145,12 @@ export {
   isDueForSchedule
 } from "./schedule-trigger.js";
 
+export {
+  WebhookIntakeRejectedError,
+  consumeWebhookInput,
+  webhookInputSchemaVersion
+} from "./webhook-intake.js";
+
 export type {
   IdempotencyKeyDefinition,
   RetryBackoffPolicy,
@@ -157,6 +163,11 @@ export type {
   WorkflowStep,
   WorkflowTrigger
 } from "./workflow-definition.js";
+
+export type {
+  ConsumeWebhookInputOptions,
+  WebhookInput
+} from "./webhook-intake.js";
 
 export type {
   RunWorkflowInput,

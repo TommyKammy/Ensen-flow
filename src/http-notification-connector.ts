@@ -103,6 +103,11 @@ export interface HttpNotificationConnector {
   fetchEvidence(request: { requestId: string }): ReturnType<typeof createUnsupportedConnectorOperationResult>;
 }
 
+interface IdempotencyRecord {
+  receipt: HttpNotificationReceipt;
+  fingerprint: string;
+}
+
 const defaultStatusReason = "HTTP notification skeleton records local submit outcomes only";
 const defaultCancelReason = "HTTP notification skeleton does not support cancellation";
 const defaultEvidenceReason = "HTTP notification skeleton does not fetch external evidence";
@@ -115,7 +120,7 @@ export const createHttpNotificationConnector = (
   const connectorId = input.connectorId ?? "http-notification";
   const now = input.now ?? (() => new Date().toISOString());
   const capabilities = createHttpNotificationCapabilities(input.transport.capabilities?.notify);
-  const successfulReceipts = new Map<string, HttpNotificationReceipt>();
+  const successfulReceipts = new Map<string, IdempotencyRecord>();
 
   const unsupported = (reason: string) =>
     createUnsupportedConnectorOperationResult({
@@ -141,18 +146,26 @@ export const createHttpNotificationConnector = (
         return invalidRequest(connectorId, validationError);
       }
 
+      const method = request.notification.method ?? "POST";
+      const fingerprint = fingerprintNotificationRequest(request, method);
       const replayed = successfulReceipts.get(request.idempotencyKey);
       if (replayed !== undefined) {
+        if (replayed.fingerprint !== fingerprint) {
+          return invalidRequest(
+            connectorId,
+            "HTTP notification idempotencyKey reuse must keep workflowId/runId/stepId/endpointAlias/method/headers/payload unchanged"
+          );
+        }
+
         return {
           ok: true,
           connectorId,
           operation: "submit",
-          value: replayed
+          value: replayed.receipt
         };
       }
 
       const attempt = request.attempt ?? 1;
-      const method = request.notification.method ?? "POST";
       const requestId = formatRequestId(connectorId, request.runId, request.stepId, attempt);
       const outcome = await input.transport.deliver({
         workflowId: request.workflowId,
@@ -199,10 +212,10 @@ export const createHttpNotificationConnector = (
           endpointAlias: request.notification.endpointAlias,
           attempt,
           idempotencyKey: request.idempotencyKey,
-          ...(outcome.evidence === undefined ? {} : outcome.evidence)
+          ...(outcome.evidence === undefined ? {} : { transport: outcome.evidence })
         }
       };
-      successfulReceipts.set(request.idempotencyKey, receipt);
+      successfulReceipts.set(request.idempotencyKey, { receipt, fingerprint });
 
       return {
         ok: true,
@@ -288,6 +301,13 @@ const validateSubmitRequest = (request: HttpNotificationSubmitRequest): string |
     return "HTTP notification idempotencyKey must be a non-empty string";
   }
 
+  if (
+    request.attempt !== undefined &&
+    (!Number.isInteger(request.attempt) || request.attempt < 1)
+  ) {
+    return "HTTP notification attempt must be a positive integer";
+  }
+
   if (!isRecord(request.notification)) {
     return "HTTP notification target must be an object";
   }
@@ -367,3 +387,32 @@ const formatRequestId = (
   stepId: string,
   attempt: number
 ): string => `${connectorId}-${runId}-${stepId}-attempt-${attempt}`;
+
+const fingerprintNotificationRequest = (
+  request: HttpNotificationSubmitRequest,
+  method: HttpNotificationMethod
+): string =>
+  stableStringify({
+    workflowId: request.workflowId,
+    runId: request.runId,
+    stepId: request.stepId,
+    endpointAlias: request.notification.endpointAlias,
+    method,
+    headers: request.notification.headers ?? null,
+    payload: request.notification.payload ?? null
+  });
+
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+};

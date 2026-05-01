@@ -103,6 +103,72 @@ describe("HTTP notification connector skeleton", () => {
     expect(transport.deliveries).toHaveLength(1);
   });
 
+  it("rejects idempotency replay when the request shape changes", async () => {
+    const transport = createFakeHttpNotificationTransport();
+    const connector = createHttpNotificationConnector({ transport });
+
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: true
+    });
+    await expect(
+      connector.submit({
+        ...notifyRequest,
+        notification: {
+          ...notifyRequest.notification,
+          endpointAlias: "local-operator-escalation"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        message:
+          "HTTP notification idempotencyKey reuse must keep workflowId/runId/stepId/endpointAlias/method/headers/payload unchanged"
+      }
+    });
+    expect(transport.deliveries).toHaveLength(1);
+  });
+
+  it("keeps canonical evidence fields separate from transport evidence", async () => {
+    const connector = createHttpNotificationConnector({
+      transport: createFakeHttpNotificationTransport({
+        outcomes: [
+          {
+            status: "succeeded",
+            evidence: {
+              kind: "untrusted-kind",
+              endpointAlias: "untrusted-endpoint",
+              attempt: 999,
+              idempotencyKey: "untrusted-key",
+              localStatus: "accepted"
+            }
+          }
+        ]
+      })
+    });
+
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        evidence: {
+          kind: "http-notification-local",
+          endpointAlias: "local-operator-notification",
+          attempt: 1,
+          idempotencyKey: "notification-demo-run:notify-operator:attempt-1",
+          transport: {
+            kind: "untrusted-kind",
+            endpointAlias: "untrusted-endpoint",
+            attempt: 999,
+            idempotencyKey: "untrusted-key",
+            localStatus: "accepted"
+          }
+        }
+      }
+    });
+  });
+
   it("returns terminal and retryable fake notification failures explicitly", async () => {
     const terminalConnector = createHttpNotificationConnector({
       transport: createFakeHttpNotificationTransport({
@@ -167,6 +233,31 @@ describe("HTTP notification connector skeleton", () => {
         code: "unsupported-operation",
         retryable: false,
         reason: "real outbound HTTP is not enabled"
+      }
+    });
+  });
+
+  it("rejects invalid retry attempt values", async () => {
+    const connector = createHttpNotificationConnector({
+      transport: createFakeHttpNotificationTransport()
+    });
+
+    await expect(connector.submit({ ...notifyRequest, attempt: 0 })).resolves.toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        message: "HTTP notification attempt must be a positive integer"
+      }
+    });
+    await expect(connector.submit({ ...notifyRequest, attempt: 1.5 })).resolves.toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        message: "HTTP notification attempt must be a positive integer"
       }
     });
   });

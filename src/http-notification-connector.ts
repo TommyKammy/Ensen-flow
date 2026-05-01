@@ -109,6 +109,11 @@ interface IdempotencyRecord {
   fingerprint: string;
 }
 
+interface PendingIdempotencySubmission {
+  fingerprint: string;
+  promise: Promise<HttpNotificationSubmitResult>;
+}
+
 const defaultStatusReason = "HTTP notification skeleton records local submit outcomes only";
 const defaultCancelReason = "HTTP notification skeleton does not support cancellation";
 const defaultEvidenceReason = "HTTP notification skeleton does not fetch external evidence";
@@ -122,6 +127,7 @@ export const createHttpNotificationConnector = (
   const now = input.now ?? (() => new Date().toISOString());
   const capabilities = createHttpNotificationCapabilities(input.transport.capabilities?.notify);
   const successfulReceipts = new Map<string, IdempotencyRecord>();
+  const pendingSubmissions = new Map<string, PendingIdempotencySubmission>();
 
   const unsupported = (reason: string) =>
     createUnsupportedConnectorOperationResult({
@@ -166,67 +172,95 @@ export const createHttpNotificationConnector = (
         };
       }
 
-      const attempt = request.attempt ?? 1;
-      const requestId = formatRequestId(connectorId, request.runId, request.stepId, attempt);
-      const outcome = await input.transport.deliver({
-        workflowId: request.workflowId,
-        runId: request.runId,
-        stepId: request.stepId,
-        requestId,
-        idempotencyKey: request.idempotencyKey,
-        attempt,
-        endpointAlias: request.notification.endpointAlias,
-        method,
-        ...(request.notification.headers === undefined
-          ? {}
-          : { headers: request.notification.headers }),
-        ...(request.notification.payload === undefined
-          ? {}
-          : { payload: request.notification.payload })
-      });
+      const pending = pendingSubmissions.get(request.idempotencyKey);
+      if (pending !== undefined) {
+        if (pending.fingerprint !== fingerprint) {
+          return invalidRequest(
+            connectorId,
+            "HTTP notification idempotencyKey reuse must keep workflowId/runId/stepId/endpointAlias/method/headers/payload unchanged"
+          );
+        }
 
-      if (outcome.status === "failed") {
-        return {
-          ok: false,
-          connectorId,
-          operation: "submit",
-          error: {
-            code: "execution-failed",
-            message: outcome.summary ?? "HTTP notification failed in local fake transport",
-            retryable: outcome.retryable === true
-          }
-        };
+        return pending.promise;
       }
 
-      const acceptedAt = now();
-      const receipt: HttpNotificationReceipt = {
-        requestId,
-        acceptedAt,
-        notification: {
-          status: outcome.status,
+      const attempt = request.attempt ?? 1;
+      const requestId = formatRequestId(connectorId, request.runId, request.stepId, attempt);
+      const submission = Promise.resolve().then(async (): Promise<HttpNotificationSubmitResult> => {
+        const outcome = await input.transport.deliver({
+          workflowId: request.workflowId,
+          runId: request.runId,
+          stepId: request.stepId,
+          requestId,
+          idempotencyKey: request.idempotencyKey,
+          attempt,
           endpointAlias: request.notification.endpointAlias,
           method,
-          attempt,
-          idempotencyKey: request.idempotencyKey,
-          ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
-          ...(outcome.retryable === undefined ? {} : { retryable: outcome.retryable })
-        },
-        evidence: {
-          kind: "http-notification-local",
-          endpointAlias: request.notification.endpointAlias,
-          attempt,
-          idempotencyKey: request.idempotencyKey,
-          ...(outcome.evidence === undefined ? {} : { transport: outcome.evidence })
-        }
-      };
-      successfulReceipts.set(request.idempotencyKey, { receipt, fingerprint });
+          ...(request.notification.headers === undefined
+            ? {}
+            : { headers: request.notification.headers }),
+          ...(request.notification.payload === undefined
+            ? {}
+            : { payload: request.notification.payload })
+        });
 
-      return {
-        ok: true,
-        connectorId,
-        operation: "submit",
-        value: receipt
-      };
+        if (outcome.status === "failed") {
+          return {
+            ok: false,
+            connectorId,
+            operation: "submit",
+            error: {
+              code: "execution-failed",
+              message: outcome.summary ?? "HTTP notification failed in local fake transport",
+              retryable: outcome.retryable === true
+            }
+          };
+        }
+
+        const acceptedAt = now();
+        const receipt: HttpNotificationReceipt = {
+          requestId,
+          acceptedAt,
+          notification: {
+            status: outcome.status,
+            endpointAlias: request.notification.endpointAlias,
+            method,
+            attempt,
+            idempotencyKey: request.idempotencyKey,
+            ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+            ...(outcome.retryable === undefined ? {} : { retryable: outcome.retryable })
+          },
+          evidence: {
+            kind: "http-notification-local",
+            endpointAlias: request.notification.endpointAlias,
+            attempt,
+            idempotencyKey: request.idempotencyKey,
+            ...(outcome.evidence === undefined ? {} : { transport: outcome.evidence })
+          }
+        };
+        successfulReceipts.set(request.idempotencyKey, { receipt, fingerprint });
+
+        return {
+          ok: true,
+          connectorId,
+          operation: "submit",
+          value: receipt
+        };
+      });
+
+      pendingSubmissions.set(request.idempotencyKey, {
+        fingerprint,
+        promise: submission
+      });
+
+      try {
+        return await submission;
+      } finally {
+        const current = pendingSubmissions.get(request.idempotencyKey);
+        if (current?.promise === submission) {
+          pendingSubmissions.delete(request.idempotencyKey);
+        }
+      }
     },
     status() {
       return createUnsupportedConnectorOperationResult({

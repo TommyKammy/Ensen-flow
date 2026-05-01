@@ -36,7 +36,8 @@ const STEP_ATTEMPT_ALLOWED_KEYS = new Set([
   "stepId",
   "attempt",
   "occurredAt",
-  "retry"
+  "retry",
+  "result"
 ]);
 const RUN_COMPLETED_ALLOWED_KEYS = new Set([
   "type",
@@ -111,6 +112,7 @@ export interface WorkflowStepAttemptEvent {
   attempt: number;
   occurredAt: string;
   retry?: WorkflowRunRetryMetadata;
+  result?: WorkflowStepAttemptResultMetadata;
 }
 
 export interface WorkflowRunCompletedEvent {
@@ -146,6 +148,7 @@ export interface WorkflowStepAttemptState {
   completedAt?: string;
   failedAt?: string;
   retry?: WorkflowRunRetryMetadata;
+  result?: WorkflowStepAttemptResultMetadata;
   status: "running" | "succeeded" | "failed" | "retryable-failed";
 }
 
@@ -154,6 +157,8 @@ export interface WorkflowRunState {
   events: WorkflowRunEvent[];
   stepAttempts: Record<string, WorkflowStepAttemptState[]>;
 }
+
+export type WorkflowStepAttemptResultMetadata = Record<string, unknown>;
 
 export const createWorkflowRun = async (
   statePath: string,
@@ -373,10 +378,12 @@ const applyStepAttemptEvent = (
     attempt.completedAt = event.occurredAt;
     attempt.status = "succeeded";
     attempt.retry = event.retry;
+    attempt.result = event.result;
   } else {
     attempt.failedAt = event.occurredAt;
     attempt.status = event.retry?.retryable === true ? "retryable-failed" : "failed";
     attempt.retry = event.retry;
+    attempt.result = event.result;
   }
 };
 
@@ -429,6 +436,13 @@ const validateWorkflowRunEvent = (
 
   if ("retry" in value) {
     validateRetryMetadata(value.retry, lineNumber);
+  }
+
+  if ("result" in value) {
+    if (eventType === "step.attempt.started") {
+      throw stateError(lineNumber, "result is only allowed on terminal step attempt events");
+    }
+    validateResultMetadata(value.result, lineNumber);
   }
 
   return value as unknown as WorkflowStepAttemptEvent;
@@ -491,6 +505,15 @@ const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
   if ("reason" in value && (typeof value.reason !== "string" || value.reason.trim() === "")) {
     throw stateError(lineNumber, "retry.reason must be a non-empty string");
   }
+};
+
+const validateResultMetadata = (value: unknown, lineNumber: number): void => {
+  if (!isRecord(value)) {
+    throw stateError(lineNumber, "result must be an object");
+  }
+
+  validateJsonSerializableValue(value, lineNumber, "result");
+  rejectCredentialShapedStrings(value, lineNumber, "result");
 };
 
 const rejectUnknownKeys = (
@@ -614,6 +637,32 @@ const validateJsonSerializableValue = (
   throw stateError(lineNumber, `${path} must contain only JSON-serializable values`);
 };
 
+const rejectCredentialShapedStrings = (
+  value: unknown,
+  lineNumber: number,
+  path: string
+): void => {
+  if (typeof value === "string") {
+    if (containsCredentialShapedValue(value)) {
+      throw stateError(lineNumber, `${path} must not contain credential-shaped values`);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      rejectCredentialShapedStrings(item, lineNumber, `${path}[${index}]`);
+    });
+    return;
+  }
+
+  if (isRecord(value)) {
+    Object.entries(value).forEach(([key, item]) => {
+      rejectCredentialShapedStrings(item, lineNumber, `${path}.${key}`);
+    });
+  }
+};
+
 const validateJsonContainer = (
   value: object,
   lineNumber: number,
@@ -665,3 +714,10 @@ const isStrictIsoTimestamp = (value: string): boolean => {
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
+
+const containsCredentialShapedValue = (value: string): boolean =>
+  /(?:^|\b)(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key)\s*[:=]/i.test(
+    value
+  ) ||
+  /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)[-_][A-Za-z0-9_-]{8,}\b/.test(value) ||
+  /-----BEGIN [A-Z ]*(?:PRIVATE KEY|TOKEN|SECRET)[A-Z ]*-----/.test(value);

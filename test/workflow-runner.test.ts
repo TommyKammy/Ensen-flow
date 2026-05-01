@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readWorkflowRunState, runWorkflow } from "../src/index.js";
-import type { WorkflowDefinition } from "../src/index.js";
+import type {
+  ExecutorConnectorStatusSnapshot,
+  WorkflowDefinition
+} from "../src/index.js";
 
 const tempRoots: string[] = [];
 
@@ -379,6 +382,177 @@ describe("sequential workflow runner", () => {
       }
     });
   });
+
+  it("fails the step when a handler returns a malformed non-void result", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-malformed-handler"
+      },
+      now: (() => {
+        let index = 0;
+        const timestamps = [
+          "2026-04-29T00:05:00.000Z",
+          "2026-04-29T00:05:01.000Z",
+          "2026-04-29T00:05:02.000Z",
+          "2026-04-29T00:05:03.000Z",
+          "2026-04-29T00:05:04.000Z"
+        ];
+        return () => timestamps[index++] ?? "2026-04-29T00:05:05.000Z";
+      })(),
+      stepHandler: () => ({}) as never
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "stepHandler must return an ExecutorConnectorStatusSnapshot or { executor }"
+        }
+      }
+    ]);
+  });
+
+  it.each([
+    {
+      executorStatus: "succeeded",
+      resultStatus: "succeeded",
+      expectedRunStatus: "succeeded",
+      expectedAttemptStatus: "succeeded",
+      summary: "Loop X-Gate 3 local fake lane succeeded."
+    },
+    {
+      executorStatus: "failed",
+      resultStatus: "failed",
+      expectedRunStatus: "failed",
+      expectedAttemptStatus: "failed",
+      summary: "Loop X-Gate 3 local fake lane failed."
+    },
+    {
+      executorStatus: "blocked",
+      resultStatus: "blocked",
+      expectedRunStatus: "failed",
+      expectedAttemptStatus: "failed",
+      summary: "Loop X-Gate 3 local fake lane blocked."
+    }
+  ] as const)(
+    "persists X-Gate 3 local lane $executorStatus outcome in Flow run state",
+    async ({
+      executorStatus,
+      resultStatus,
+      expectedRunStatus,
+      expectedAttemptStatus,
+      summary
+    }) => {
+      const definition = readWorkflowFixture("simple-manual.valid.json");
+      definition.id = `xgate3-local-lane-${executorStatus}`;
+      definition.steps = [
+        {
+          id: "xgate3-local-lane",
+          action: {
+            type: "local",
+            name: "loop_xgate3_local_lane"
+          }
+        }
+      ];
+      const statePath = await createTempStatePath();
+
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId: `xgate3-${executorStatus}`
+        },
+        now: (() => {
+          let index = 0;
+          const timestamps = [
+            "2026-05-01T04:00:00.000Z",
+            "2026-05-01T04:00:01.000Z",
+            "2026-05-01T04:00:02.000Z",
+            "2026-05-01T04:00:03.000Z"
+          ];
+          return () => timestamps[index++] ?? "2026-05-01T04:00:04.000Z";
+        })(),
+        stepHandler: () =>
+          ({
+            requestId: `req_xgate3_${executorStatus}_local_lane`,
+            status: executorStatus,
+            observedAt: "2026-05-01T04:00:03.000Z",
+            result: {
+              status: resultStatus,
+              summary,
+              evidence: {
+                verification: {
+                  status: resultStatus === "succeeded" ? "passed" : resultStatus,
+                  summary
+                },
+                warnings: [{ code: "local-lane-only", message: "Local smoke reference only." }],
+                ...(resultStatus === "succeeded"
+                  ? {}
+                  : { errors: [{ code: resultStatus, message: summary }] }),
+                localArtifacts: [
+                  {
+                    kind: "aggregate-json",
+                    path: "state/x-gate3/aggregate.json",
+                    contentType: "application/json",
+                    description: "Local X-Gate 3 smoke aggregate"
+                  }
+                ],
+                localArtifactSemantics: "local-development-references-only",
+                productionEvidence: false
+              }
+            }
+          }) satisfies ExecutorConnectorStatusSnapshot
+      });
+
+      expect(result.run.status).toBe(expectedRunStatus);
+      expect(result.stepAttempts["xgate3-local-lane"]).toMatchObject([
+        {
+          attempt: 1,
+          status: expectedAttemptStatus,
+          result: {
+            executor: {
+              requestId: `req_xgate3_${executorStatus}_local_lane`,
+              status: executorStatus,
+              result: {
+                status: resultStatus,
+                summary,
+                evidence: {
+                  verification: {
+                    status: resultStatus === "succeeded" ? "passed" : resultStatus,
+                    summary
+                  },
+                  localArtifacts: [
+                    {
+                      kind: "aggregate-json",
+                      path: "state/x-gate3/aggregate.json"
+                    }
+                  ],
+                  localArtifactSemantics: "local-development-references-only",
+                  productionEvidence: false
+                }
+              }
+            }
+          }
+        }
+      ]);
+
+      const persisted = await readWorkflowRunState(statePath);
+      expect(JSON.stringify(persisted)).not.toContain("compliance evidence");
+      expect(JSON.stringify(persisted)).not.toContain("production evidence archive");
+      expect(persisted.stepAttempts["xgate3-local-lane"][0].result).toEqual(
+        result.stepAttempts["xgate3-local-lane"][0].result
+      );
+    }
+  );
 
   it("returns the existing terminal run when the idempotency key matches", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");

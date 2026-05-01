@@ -171,7 +171,9 @@ export const createCliEnsenLoopEipExecutorTransport = (
       return requireSmokeAggregate(smokeAggregates, request.requestId, "status").statusSnapshot;
     },
     getRunResult(request: { requestId: string }) {
-      return requireSmokeAggregate(smokeAggregates, request.requestId, "result").runResult;
+      return enrichSmokeRunResult(
+        requireSmokeAggregate(smokeAggregates, request.requestId, "result")
+      );
     },
     getEvidenceBundleRef(request: { requestId: string }) {
       return requireSmokeAggregate(smokeAggregates, request.requestId, "evidence").evidenceBundleRef;
@@ -290,7 +292,7 @@ export const createEnsenLoopEipExecutorConnector = (
       const status = snapshot as EipRunStatusSnapshotV1;
       const mappedStatus = mapRunStatus(status.status);
 
-      if (status.status === "completed") {
+      if (hasTerminalRunResult(status.status)) {
         const result = await input.transport.getRunResult(request);
         const resultVersion = requireSchemaVersion(result, "eip.run-result.v1", "RunResult");
 
@@ -840,6 +842,7 @@ interface EipRunResultV1 {
   errors?: unknown[];
   warnings?: unknown[];
   metrics?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
 }
 
 interface EnsenLoopXGate2SmokeAggregateV1 {
@@ -868,6 +871,12 @@ interface EnsenLoopXGate3LocalLaneSmokeAggregateV1 {
   runResult: EipRunResultV1;
   localArtifacts: Array<Record<string, unknown>>;
   evidenceBundleRef?: Record<string, unknown>;
+}
+
+interface XGate3LocalLaneEvidence {
+  localArtifacts: Array<Record<string, unknown>>;
+  localArtifactSemantics: "local-development-references-only";
+  productionEvidence: false;
 }
 
 type EnsenLoopSmokeAggregateV1 =
@@ -943,17 +952,26 @@ const mapRunStatus = (status: EipRunStatusSnapshotV1["status"]): ExecutorConnect
   }
 };
 
+const hasTerminalRunResult = (status: EipRunStatusSnapshotV1["status"]): boolean =>
+  status === "completed" ||
+  status === "failed" ||
+  status === "blocked" ||
+  status === "cancelled";
+
 const mapRunResultToStatusSnapshot = (
   result: EipRunResultV1,
   observedAt?: string
 ): ExecutorConnectorStatusSnapshot => {
   const resultStatus = mapRunResultStatus(result.status);
   const summary = result.verification?.summary;
+  const localLaneEvidence = extractXGate3LocalLaneEvidence(result.extensions);
   const evidence = {
+    ...(result.verification === undefined ? {} : { verification: result.verification }),
     ...(result.evidenceBundles === undefined ? {} : { evidenceBundles: result.evidenceBundles }),
     ...(result.errors === undefined ? {} : { errors: result.errors }),
     ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
-    ...(result.metrics === undefined ? {} : { metrics: result.metrics })
+    ...(result.metrics === undefined ? {} : { metrics: result.metrics }),
+    ...(localLaneEvidence === undefined ? {} : localLaneEvidence)
   };
 
   return {
@@ -1025,6 +1043,65 @@ const validateRunStatusSnapshot = (
   }
 
   return undefined;
+};
+
+const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResultV1 => {
+  if (aggregate.schemaVersion !== "ensen-loop.x-gate3-local-lane-smoke.v1") {
+    return aggregate.runResult;
+  }
+
+  return {
+    ...aggregate.runResult,
+    extensions: {
+      ...(aggregate.runResult.extensions ?? {}),
+      "x-ensen-flow-local-lane": {
+        localArtifacts: aggregate.localArtifacts,
+        localArtifactSemantics: "local-development-references-only",
+        productionEvidence: false
+      }
+    }
+  };
+};
+
+const extractXGate3LocalLaneEvidence = (
+  extensions: Record<string, unknown> | undefined
+): XGate3LocalLaneEvidence | undefined => {
+  const localLane = extensions?.["x-ensen-flow-local-lane"];
+  if (!isRecord(localLane)) {
+    return undefined;
+  }
+
+  const unknownProperty = findUnknownProperty(localLane, [
+    "localArtifacts",
+    "localArtifactSemantics",
+    "productionEvidence"
+  ]);
+  if (unknownProperty !== undefined) {
+    return undefined;
+  }
+
+  if (
+    localLane.localArtifactSemantics !== "local-development-references-only" ||
+    localLane.productionEvidence !== false ||
+    !Array.isArray(localLane.localArtifacts) ||
+    localLane.localArtifacts.length === 0
+  ) {
+    return undefined;
+  }
+
+  const localArtifacts: Array<Record<string, unknown>> = [];
+  for (const artifact of localLane.localArtifacts) {
+    if (validateXGate3LocalArtifact(artifact, "x-ensen-flow-local-lane.localArtifacts[]")) {
+      return undefined;
+    }
+    localArtifacts.push(sanitizeXGate3LocalArtifact(artifact));
+  }
+
+  return {
+    localArtifacts,
+    localArtifactSemantics: "local-development-references-only",
+    productionEvidence: false
+  };
 };
 
 const validateSmokeAggregate = (
@@ -1347,6 +1424,14 @@ const validateXGate3LocalArtifact = (
   return undefined;
 };
 
+const sanitizeXGate3LocalArtifact = (value: Record<string, unknown>): Record<string, unknown> => ({
+  kind: value.kind,
+  path: value.path,
+  ...(value.contentType === undefined ? {} : { contentType: value.contentType }),
+  ...(value.description === undefined ? {} : { description: value.description }),
+  ...(value.checksum === undefined ? {} : { checksum: value.checksum })
+});
+
 const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {
   if (!isRecord(value)) {
     return failClosedReason("EIP RunRequest must be an object");
@@ -1544,7 +1629,7 @@ const validateRunResult = (
     return failClosedReason("EIP RunResult metrics must be an object");
   }
 
-  return undefined;
+  return validateExtensionMap(value.extensions, "EIP RunResult extensions");
 };
 
 const validateEvidenceBundleRef = (

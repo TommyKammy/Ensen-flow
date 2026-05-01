@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -252,6 +252,65 @@ describe("local file connector skeleton", () => {
         retryable: false
       }
     });
+  });
+
+  it("rejects symlink traversal before reading or writing fixture files", async () => {
+    const fixtureRoot = await createTempRoot();
+    const outsideRoot = await createTempRoot();
+    await mkdir(join(outsideRoot, "data"), { recursive: true });
+    await writeFile(join(outsideRoot, "data", "secret.txt"), "outside", "utf8");
+    await symlink(join(outsideRoot, "data"), join(fixtureRoot, "linked-data"));
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }]
+    });
+
+    await expect(
+      connector.submit({
+        workflowId: "file-demo",
+        runId: "file-demo-run",
+        stepId: "read-symlink",
+        idempotencyKey: "file-demo-run:read-symlink",
+        file: {
+          action: "read",
+          rootAlias: "fixture-root",
+          path: "linked-data/secret.txt"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        message: "local file path must stay under the allowed root",
+        retryable: false
+      }
+    });
+
+    await expect(
+      connector.submit({
+        workflowId: "file-demo",
+        runId: "file-demo-run",
+        stepId: "write-symlink",
+        idempotencyKey: "file-demo-run:write-symlink",
+        file: {
+          action: "write",
+          rootAlias: "fixture-root",
+          path: "linked-data/secret.txt",
+          content: "overwritten"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        message: "local file path must stay under the allowed root",
+        retryable: false
+      }
+    });
+    await expect(readFile(join(outsideRoot, "data", "secret.txt"), "utf8")).resolves.toBe(
+      "outside"
+    );
   });
 
   it("rejects unsafe allowed root configuration before fixture operations are available", () => {

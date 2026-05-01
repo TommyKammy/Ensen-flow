@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   dirname,
   isAbsolute,
@@ -204,7 +204,7 @@ export const createLocalFileConnector = (
         return invalidRequest(connectorId, validationError);
       }
 
-      const resolved = resolveLocalFileRequest(request.file, allowedRoots);
+      const resolved = await resolveLocalFileRequest(request.file, allowedRoots);
       if (typeof resolved === "string") {
         return invalidRequest(connectorId, resolved);
       }
@@ -403,10 +403,10 @@ const validateSubmitRequest = (request: LocalFileSubmitRequest): string | undefi
   return undefined;
 };
 
-const resolveLocalFileRequest = (
+const resolveLocalFileRequest = async (
   file: LocalFileRequest,
   allowedRoots: Map<string, NormalizedAllowedRoot>
-): ResolvedLocalFileRequest | string => {
+): Promise<ResolvedLocalFileRequest | string> => {
   const root = allowedRoots.get(file.rootAlias);
   if (root === undefined) {
     return "local file rootAlias is not configured";
@@ -435,11 +435,55 @@ const resolveLocalFileRequest = (
     return "local file path must stay under the allowed root";
   }
 
+  const symlinkTraversalError = await validateNoSymbolicLinkTraversal(
+    root.path,
+    relativeToRoot
+  );
+  if (symlinkTraversalError !== undefined) {
+    return symlinkTraversalError;
+  }
+
   return {
     file,
     sanitizedPath: relativeToRoot.split(sep).join("/"),
     absolutePath
   };
+};
+
+const validateNoSymbolicLinkTraversal = async (
+  rootPath: string,
+  relativePath: string
+): Promise<string | undefined> => {
+  const rootState = await readPathState(rootPath);
+  if (rootState === "symbolic-link" || rootState === "blocked") {
+    return "local file path must stay under the allowed root";
+  }
+
+  let currentPath = rootPath;
+  for (const segment of relativePath.split(sep)) {
+    currentPath = resolve(currentPath, segment);
+    const state = await readPathState(currentPath);
+    if (state === "missing") {
+      return undefined;
+    }
+
+    if (state === "symbolic-link" || state === "blocked") {
+      return "local file path must stay under the allowed root";
+    }
+  }
+
+  return undefined;
+};
+
+const readPathState = async (
+  path: string
+): Promise<"regular" | "symbolic-link" | "missing" | "blocked"> => {
+  try {
+    const stats = await lstat(path);
+    return stats.isSymbolicLink() ? "symbolic-link" : "regular";
+  } catch (error) {
+    return isNodeError(error) && error.code === "ENOENT" ? "missing" : "blocked";
+  }
 };
 
 const executeFileRequest = async (

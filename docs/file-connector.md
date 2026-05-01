@@ -20,7 +20,9 @@ audit-oriented surfaces use the alias plus a relative path such as
 
 Requests fail closed when the root alias is missing, the requested path is
 absolute, the path traverses outside the allowed root, the action is not `read`
-or `write`, or write content is not an explicit string.
+or `write`, or write content is not an explicit string. Existing symbolic links
+in the allowed root or requested path are rejected before the connector reads or
+writes fixture content.
 
 ## Actions
 

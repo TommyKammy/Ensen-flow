@@ -973,32 +973,57 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
   it.each([
     {
       name: "empty workspace root",
-      workspaceRoot: "",
-      stateRoot: "state-root"
+      workspaceRoot: (_tempRoot: string) => "",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "relative workspace root",
+      workspaceRoot: (_tempRoot: string) => "workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "URL-style workspace root",
+      workspaceRoot: (_tempRoot: string) => "https://example.test/workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "scheme-like workspace root",
+      workspaceRoot: (_tempRoot: string) => "flow-root:workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "traversal-style workspace root",
+      workspaceRoot: (tempRoot: string) => `${join(tempRoot, "workspace-root")}/../other-root`,
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
     },
     {
       name: "credential-shaped state root",
-      workspaceRoot: "workspace-root",
-      stateRoot: "state-root?token=sample-secret"
+      workspaceRoot: (tempRoot: string) => join(tempRoot, "workspace-root"),
+      stateRoot: (tempRoot: string) => `${join(tempRoot, "state-root")}?token=sample-secret`
     }
   ])("rejects unsafe X-Gate 3 local roots before invoking Loop: $name", async ({
     workspaceRoot,
     stateRoot
   }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-root-guard-"));
     const transport = createCliEnsenLoopEipExecutorTransport({
       command: "unused-loop-cli",
       xGate3Smoke: {
-        workspaceRoot,
-        stateRoot
+        workspaceRoot: workspaceRoot(tempRoot),
+        stateRoot: stateRoot(tempRoot)
       }
     });
 
-    await expect(transport.submitRunRequest(createSmokeRunRequest()))
-      .rejects.toMatchObject({
+    try {
+      await expect(transport.submitRunRequest(createSmokeRunRequest())).rejects.toMatchObject({
         failureClass: "flow-gap",
         operation: "submit",
-        message: "Ensen-loop X-Gate 3 smoke roots must be non-empty local path strings"
+        message:
+          "Ensen-loop X-Gate 3 smoke roots must be non-empty absolute local path strings without traversal or credential-shaped values"
       });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("times out a CLI process that ignores SIGTERM", async () => {

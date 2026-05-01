@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 
 import {
   createExecutorConnectorCapabilities,
@@ -482,7 +482,8 @@ const createSmokeCliArgs = (
   const { workspaceRoot, stateRoot } = input.xGate3Smoke;
   if (!isUsableLocalRoot(workspaceRoot) || !isUsableLocalRoot(stateRoot)) {
     throw new EnsenLoopCliTransportError({
-      message: "Ensen-loop X-Gate 3 smoke roots must be non-empty local path strings",
+      message:
+        "Ensen-loop X-Gate 3 smoke roots must be non-empty absolute local path strings without traversal or credential-shaped values",
       failureClass: "flow-gap",
       operation: "submit"
     });
@@ -1987,11 +1988,29 @@ const isIsoDateTimeUtc = (value: unknown): boolean =>
 const isNonEmptyString = (value: unknown, maxLength: number): boolean =>
   typeof value === "string" && value.length > 0 && value.length <= maxLength;
 
-const isUsableLocalRoot = (value: unknown): boolean =>
-  typeof value === "string" &&
-  value.length > 0 &&
-  !value.includes("\0") &&
-  !containsCredentialShapedValue(value);
+const isUsableLocalRoot = (value: unknown): boolean => {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.includes("\0") ||
+    containsCredentialShapedValue(value) ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) ||
+    value.includes("://") ||
+    !isAbsolute(value)
+  ) {
+    return false;
+  }
+
+  const normalized = normalize(value);
+  if (!isAbsolute(normalized) || normalized.includes("\0")) {
+    return false;
+  }
+
+  const hasTraversalSegment = (candidate: string): boolean =>
+    candidate.split(/[\\/]+/).includes("..");
+
+  return !hasTraversalSegment(value) && !hasTraversalSegment(normalized);
+};
 
 const isLocalEvidencePath = (value: string): boolean =>
   /^(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(

@@ -9,6 +9,9 @@ import type { WorkflowDefinition } from "./workflow-definition.js";
 import { runWorkflow } from "./workflow-runner.js";
 import type { WorkflowStepHandler } from "./workflow-runner.js";
 
+const SCHEDULED_FOR_UTC_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$/;
+
 export interface EvaluateScheduleTriggerInput {
   definition: WorkflowDefinition;
   stateRoot: string;
@@ -30,6 +33,8 @@ export type ScheduleTriggerEvaluationResult =
 export const evaluateScheduleTrigger = async (
   input: EvaluateScheduleTriggerInput
 ): Promise<ScheduleTriggerEvaluationResult> => {
+  const scheduledFor = normalizeScheduledForUtc(input.scheduledFor);
+
   const validation = validateWorkflowDefinition(input.definition);
   if (!validation.valid) {
     const details = validation.errors
@@ -42,14 +47,14 @@ export const evaluateScheduleTrigger = async (
     throw new Error("evaluateScheduleTrigger requires a schedule trigger workflow");
   }
 
-  if (!isDueForSchedule(input.definition.trigger.cron, input.scheduledFor)) {
+  if (!isDueForSchedule(input.definition.trigger.cron, scheduledFor)) {
     return {
       status: "not-due",
       reason: "scheduledFor does not match trigger.cron"
     };
   }
 
-  const runId = createScheduleRunId(input.definition.id, input.scheduledFor);
+  const runId = createScheduleRunId(input.definition.id, scheduledFor);
   return runWorkflow({
     definition: input.definition,
     statePath: join(input.stateRoot, `${runId}.jsonl`),
@@ -58,7 +63,7 @@ export const evaluateScheduleTrigger = async (
     triggerContext: {
       schedule: {
         cron: input.definition.trigger.cron,
-        scheduledFor: input.scheduledFor
+        scheduledFor
       }
     },
     now: input.now,
@@ -71,8 +76,8 @@ export const isDueForSchedule = (cron: string, scheduledFor: string): boolean =>
     return false;
   }
 
-  const scheduledForDate = new Date(scheduledFor);
-  if (!Number.isFinite(scheduledForDate.getTime())) {
+  const scheduledForDate = parseScheduledForUtc(scheduledFor);
+  if (scheduledForDate === undefined) {
     return false;
   }
 
@@ -93,3 +98,29 @@ const createScheduleRunId = (workflowId: string, scheduledFor: string): string =
 
 const compactTimestamp = (value: string): string =>
   value.replaceAll("-", "").replaceAll(":", "").replace(".", "").replace("Z", "Z");
+
+const parseScheduledForUtc = (value: string): Date | undefined => {
+  const match = SCHEDULED_FOR_UTC_PATTERN.exec(value);
+  if (match === null) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    return undefined;
+  }
+
+  const canonicalInput = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${
+    match[7] ?? "000"
+  }Z`;
+  return parsed.toISOString() === canonicalInput ? parsed : undefined;
+};
+
+const normalizeScheduledForUtc = (value: string): string => {
+  const parsed = parseScheduledForUtc(value);
+  if (parsed === undefined) {
+    throw new Error("scheduledFor must be an ISO-8601 UTC timestamp");
+  }
+
+  return parsed.toISOString();
+};

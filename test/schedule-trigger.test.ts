@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   evaluateScheduleTrigger,
+  isDueForSchedule,
   readWorkflowRunState,
   validateWorkflowDefinition
 } from "../src/index.js";
@@ -105,7 +106,7 @@ describe("schedule trigger", () => {
       definition,
       stateRoot,
       auditPath,
-      scheduledFor: "2026-05-02T09:00:00.000Z"
+      scheduledFor: "2026-05-02T09:00:00Z"
     });
 
     if (!("run" in first) || !("run" in second)) {
@@ -169,5 +170,22 @@ describe("schedule trigger", () => {
     await expect(
       readFile(join(stateRoot, "local-schedule-demo-scheduled-20260502T090100000Z.jsonl"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects offset-less or malformed scheduledFor values before cron matching", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+
+    expect(isDueForSchedule("0 9 * * *", "2026-05-02T09:00:00")).toBe(false);
+    expect(isDueForSchedule("0 9 * * *", "2026/05/02 09:00:00Z")).toBe(false);
+    expect(isDueForSchedule("0 9 * * *", "2026-02-31T09:00:00Z")).toBe(false);
+
+    await expect(
+      evaluateScheduleTrigger({
+        definition: createScheduleWorkflow(),
+        stateRoot,
+        scheduledFor: "2026-05-02T09:00:00"
+      })
+    ).rejects.toThrow("scheduledFor must be an ISO-8601 UTC timestamp");
   });
 });

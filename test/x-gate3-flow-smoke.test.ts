@@ -103,16 +103,14 @@ describe("Flow X-Gate 3 caller smoke", () => {
                     status: laneStatus === "succeeded" ? "passed" : laneStatus,
                     summary
                   },
-                  localArtifacts: [
-                    {
-                      kind: "aggregate-json",
-                      path: "state/x-gate3/aggregate.json"
-                    },
-                    {
-                      kind: "log",
-                      path: "state/x-gate3/loop.log"
-                    }
-                  ],
+                  localArtifacts: {
+                    laneRunId: `lane_flow_xgate3_${laneStatus}`,
+                    stateFile: "state/x-gate3/lane-run.jsonl",
+                    evidenceMetadata: [
+                      "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json",
+                      "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json"
+                    ]
+                  },
                   localArtifactSemantics: "local-development-references-only",
                   productionEvidence: false
                 }
@@ -406,10 +404,14 @@ const writeLoopXGate3SmokeCli = async (
       "      },",
       "      warnings: [{ code: 'local-lane-only', message: 'Local smoke reference only.' }]",
       "    },",
-      "    localArtifacts: [",
-      "      { kind: 'aggregate-json', path: 'state/x-gate3/aggregate.json', contentType: 'application/json', description: 'Local X-Gate 3 smoke aggregate' },",
-      "      { kind: 'log', path: 'state/x-gate3/loop.log', contentType: 'text/plain' }",
-      "    ]",
+      "    localArtifacts: {",
+      `      laneRunId: ${JSON.stringify(`lane_flow_xgate3_${input.laneStatus}`)},`,
+      "      stateFile: 'state/x-gate3/lane-run.jsonl',",
+      "      evidenceMetadata: [",
+      "        'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json',",
+      "        'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json'",
+      "      ]",
+      "    }",
       "  }));",
       "}",
       "void workspaceRoot;",

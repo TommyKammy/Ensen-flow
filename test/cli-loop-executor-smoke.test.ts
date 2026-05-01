@@ -559,19 +559,14 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "      summary: 'Loop X-Gate 3 local fake lane succeeded.'",
         "    }",
         "  },",
-        "  localArtifacts: [",
-        "    {",
-        "      kind: 'aggregate-json',",
-        "      path: 'state/x-gate3/aggregate.json',",
-        "      contentType: 'application/json',",
-        "      description: 'Local X-Gate 3 smoke aggregate'",
-        "    },",
-        "    {",
-        "      kind: 'log',",
-        "      path: 'state/x-gate3/loop.log',",
-        "      contentType: 'text/plain'",
-        "    }",
-        "  ]",
+        "  localArtifacts: {",
+        "    laneRunId: 'lane_xgate3_smoke',",
+        "    stateFile: 'state/x-gate3/lane-run.jsonl',",
+        "    evidenceMetadata: [",
+        "      'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json',",
+        "      'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json'",
+        "    ]",
+        "  }",
         "}; }",
         ""
       ].join("\n"),
@@ -624,16 +619,95 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
             status,
             summary,
             evidence: {
-              localArtifacts: [
-                {
-                  kind: "aggregate-json",
-                  path: "state/x-gate3/aggregate.json"
-                },
-                {
-                  kind: "log",
-                  path: "state/x-gate3/loop.log"
-                }
-              ],
+              localArtifacts: {
+                laneRunId: "lane_xgate3_smoke",
+                stateFile: "state/x-gate3/lane-run.jsonl",
+                evidenceMetadata: [
+                  "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json",
+                  "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json"
+                ]
+              },
+              localArtifactSemantics: "local-development-references-only",
+              productionEvidence: false
+            }
+          }
+        }
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "empty evidenceMetadata",
+      localArtifacts: {
+        ...createXGate3Aggregate().localArtifacts,
+        evidenceMetadata: []
+      }
+    },
+    {
+      name: "omitted evidenceMetadata",
+      localArtifacts: {
+        laneRunId: createXGate3Aggregate().localArtifacts.laneRunId,
+        stateFile: createXGate3Aggregate().localArtifacts.stateFile
+      }
+    }
+  ])("accepts X-Gate 3 local artifacts with $name", async ({ localArtifacts }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-metadata-"));
+    const cliPath = join(tempRoot, "loop-x-gate3-cli.mjs");
+    const aggregate = {
+      ...createXGate3Aggregate(),
+      localArtifacts
+    };
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "import { readFileSync } from 'node:fs';",
+        "const request = JSON.parse(readFileSync(process.argv[3], 'utf8'));",
+        `const aggregate = ${JSON.stringify(aggregate)};`,
+        "aggregate.requestId = request.id;",
+        "aggregate.correlationId = request.correlationId;",
+        "aggregate.statusSnapshot.requestId = request.id;",
+        "aggregate.statusSnapshot.correlationId = request.correlationId;",
+        "aggregate.runResult.requestId = request.id;",
+        "aggregate.runResult.correlationId = request.correlationId;",
+        "process.stdout.write(JSON.stringify(aggregate));",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const connector = createEnsenLoopEipExecutorConnector({
+        transport: createCliEnsenLoopEipExecutorTransport({
+          command: process.execPath,
+          args: [cliPath, "x-gate3-smoke"]
+        })
+      });
+
+      const submitted = await connector.submit(createSmokeSubmitRequest());
+      expect(submitted).toMatchObject({
+        ok: true,
+        value: {
+          requestId: "req_cli_loop_smoke_loop_dry_run_1"
+        }
+      });
+
+      const result = await connector.status({ requestId: "req_cli_loop_smoke_loop_dry_run_1" });
+      expect(result).toMatchObject({
+        ok: true,
+        value: {
+          result: {
+            evidence: {
+              localArtifacts: {
+                laneRunId: "lane_xgate3_smoke",
+                stateFile: "state/x-gate3/lane-run.jsonl",
+                evidenceMetadata: []
+              },
               localArtifactSemantics: "local-development-references-only",
               productionEvidence: false
             }
@@ -707,101 +781,111 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "EIP XGate3LocalLaneSmokeAggregate writesProductionEvidenceArchive must be false"
     },
     {
+      name: "non-array evidence metadata",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json"
+        }
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata must be an array"
+    },
+    {
       name: "traversing local artifact path",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "aggregate-json",
-            path: "../state/x-gate3/aggregate.json"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["../state/x-gate3/aggregate.json"]
+        }
       },
-      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     },
     {
       name: "absolute local artifact path",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "aggregate-json",
-            path: "/tmp/x-gate3/aggregate.json"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["/tmp/x-gate3/aggregate.json"]
+        }
       },
-      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     },
     {
       name: "home-relative local artifact path",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "aggregate-json",
-            path: "~/state/x-gate3/aggregate.json"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["~/state/x-gate3/aggregate.json"]
+        }
       },
-      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     },
     {
       name: "user-home-relative local artifact path",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "aggregate-json",
-            path: "~operator/state/x-gate3/aggregate.json"
-          }
-        ]
-      },
-      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
-    },
-    {
-      name: "credential-shaped local artifact value",
-      aggregate: {
-        ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "log",
-            path: "state/x-gate3/log.txt",
-            description: "token=sample-secret"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["~operator/state/x-gate3/aggregate.json"]
+        }
       },
       expectedMessage:
-        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
+    },
+    {
+      name: "unsafe state file path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          stateFile: "../state/x-gate3/lane-run.jsonl"
+        }
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts.stateFile is malformed"
+    },
+    {
+      name: "credential-shaped local artifact metadata path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["state/x-gate3/token=sample-secret/log.txt"]
+        }
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     },
     {
       name: "underscore-delimited GitHub token artifact value",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "log",
-            path: "state/x-gate3/log.txt",
-            description: "ghp_sampletokenvalue"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["state/x-gate3/ghp_sampletokenvalue/log.txt"]
+        }
       },
       expectedMessage:
-        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     },
     {
       name: "underscore-delimited GitHub fine-grained token artifact value",
       aggregate: {
         ...createXGate3Aggregate(),
-        localArtifacts: [
-          {
-            kind: "log",
-            path: "state/x-gate3/log.txt",
-            description: "github_pat_sampletokenvalue"
-          }
-        ]
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: ["state/x-gate3/github_pat_sampletokenvalue/log.txt"]
+        }
       },
       expectedMessage:
-        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts.evidenceMetadata[0] is malformed"
     }
   ])("rejects malformed X-Gate 3 local lane aggregate $name", async ({
     aggregate,
@@ -853,13 +937,16 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     {
       name: "unsupported local artifact field",
       extension: {
-        localArtifacts: [
-          {
-            kind: "aggregate-json",
-            path: "state/x-gate3/aggregate.json",
-            durableEvidenceArchive: true
-          }
-        ],
+        localArtifacts: {
+          ...createXGate3Aggregate().localArtifacts,
+          evidenceMetadata: [
+            {
+              kind: "aggregate-json",
+              path: "state/x-gate3/aggregate.json",
+              durableEvidenceArchive: true
+            }
+          ]
+        },
         localArtifactSemantics: "local-development-references-only",
         productionEvidence: false
       }
@@ -995,10 +1082,14 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
         "      completedAt: '2026-05-01T04:00:03.000Z',",
         "      verification: { status: 'passed', summary: 'Loop X-Gate 3 local fake lane succeeded.' }",
         "    },",
-        "    localArtifacts: [",
-        "      { kind: 'aggregate-json', path: 'state/x-gate3/aggregate.json' },",
-        "      { kind: 'log', path: 'state/x-gate3/loop.log' }",
-        "    ]",
+        "    localArtifacts: {",
+        "      laneRunId: 'lane_xgate3_roots',",
+        "      stateFile: 'state/x-gate3/lane-run.jsonl',",
+        "      evidenceMetadata: [",
+        "        'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json',",
+        "        'evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json'",
+        "      ]",
+        "    }",
         "  }));",
         "}",
         ""
@@ -1304,19 +1395,14 @@ const createXGate3Aggregate = () => ({
       summary: "Loop X-Gate 3 local fake lane succeeded."
     }
   },
-  localArtifacts: [
-    {
-      kind: "aggregate-json",
-      path: "state/x-gate3/aggregate.json",
-      contentType: "application/json",
-      description: "Local X-Gate 3 smoke aggregate"
-    },
-    {
-      kind: "log",
-      path: "state/x-gate3/loop.log",
-      contentType: "text/plain"
-    }
-  ]
+  localArtifacts: {
+    laneRunId: "lane_xgate3_smoke",
+    stateFile: "state/x-gate3/lane-run.jsonl",
+    evidenceMetadata: [
+      "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json",
+      "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-lane.json"
+    ]
+  }
 });
 
 const createSmokeSubmitRequest = (): ExecutorSubmitRequest => ({

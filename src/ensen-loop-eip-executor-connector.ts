@@ -869,12 +869,24 @@ interface EnsenLoopXGate3LocalLaneSmokeAggregateV1 {
   writesProductionEvidenceArchive: false;
   statusSnapshot: EipRunStatusSnapshotV1;
   runResult: EipRunResultV1;
-  localArtifacts: Array<Record<string, unknown>>;
+  localArtifacts: EnsenLoopXGate3RawLocalArtifactsV1;
   evidenceBundleRef?: Record<string, unknown>;
 }
 
+interface EnsenLoopXGate3RawLocalArtifactsV1 {
+  laneRunId: string;
+  stateFile: string;
+  evidenceMetadata?: string[];
+}
+
+interface EnsenLoopXGate3LocalArtifactsV1 {
+  laneRunId: string;
+  stateFile: string;
+  evidenceMetadata: string[];
+}
+
 interface XGate3LocalLaneEvidence {
-  localArtifacts: Array<Record<string, unknown>>;
+  localArtifacts: EnsenLoopXGate3LocalArtifactsV1;
   localArtifactSemantics: "local-development-references-only";
   productionEvidence: false;
 }
@@ -1055,7 +1067,7 @@ const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResul
     extensions: {
       ...(aggregate.runResult.extensions ?? {}),
       "x-ensen-flow-local-lane": {
-        localArtifacts: aggregate.localArtifacts,
+        localArtifacts: sanitizeXGate3LocalArtifacts(aggregate.localArtifacts),
         localArtifactSemantics: "local-development-references-only",
         productionEvidence: false
       }
@@ -1082,23 +1094,23 @@ const extractXGate3LocalLaneEvidence = (
 
   if (
     localLane.localArtifactSemantics !== "local-development-references-only" ||
-    localLane.productionEvidence !== false ||
-    !Array.isArray(localLane.localArtifacts) ||
-    localLane.localArtifacts.length === 0
+    localLane.productionEvidence !== false
   ) {
     return undefined;
   }
 
-  const localArtifacts: Array<Record<string, unknown>> = [];
-  for (const artifact of localLane.localArtifacts) {
-    if (validateXGate3LocalArtifact(artifact, "x-ensen-flow-local-lane.localArtifacts[]")) {
-      return undefined;
-    }
-    localArtifacts.push(sanitizeXGate3LocalArtifact(artifact));
+  if (
+    validateXGate3LocalArtifacts(
+      localLane.localArtifacts,
+      "x-ensen-flow-local-lane.localArtifacts"
+    )
+  ) {
+    return undefined;
   }
 
+  const localArtifacts = localLane.localArtifacts as EnsenLoopXGate3RawLocalArtifactsV1;
   return {
-    localArtifacts,
+    localArtifacts: sanitizeXGate3LocalArtifacts(localArtifacts),
     localArtifactSemantics: "local-development-references-only",
     productionEvidence: false
   };
@@ -1307,18 +1319,12 @@ const validateXGate3LocalLaneSmokeAggregate = (
     return failClosedReason(`${shapeName} correlationId does not match nested payloads`);
   }
 
-  if (!Array.isArray(value.localArtifacts) || value.localArtifacts.length === 0) {
-    return failClosedReason(`${shapeName} localArtifacts must be a non-empty array`);
-  }
-
-  for (const [index, artifact] of value.localArtifacts.entries()) {
-    const artifactValidation = validateXGate3LocalArtifact(
-      artifact,
-      `${shapeName} localArtifacts[${index}]`
-    );
-    if (artifactValidation !== undefined) {
-      return artifactValidation;
-    }
+  const artifactsValidation = validateXGate3LocalArtifacts(
+    value.localArtifacts,
+    `${shapeName} localArtifacts`
+  );
+  if (artifactsValidation !== undefined) {
+    return artifactsValidation;
   }
 
   if (value.evidenceBundleRef !== undefined) {
@@ -1344,7 +1350,7 @@ const validateXGate3LocalLaneSmokeAggregate = (
   return undefined;
 };
 
-const validateXGate3LocalArtifact = (
+const validateXGate3LocalArtifacts = (
   value: unknown,
   shapeName: string
 ): { message: string; reason: string } | undefined => {
@@ -1353,83 +1359,54 @@ const validateXGate3LocalArtifact = (
   }
 
   const unknownProperty = findUnknownProperty(value, [
-    "kind",
-    "path",
-    "contentType",
-    "description",
-    "checksum"
+    "laneRunId",
+    "stateFile",
+    "evidenceMetadata"
   ]);
-
   if (unknownProperty !== undefined) {
     return failClosedReason(`${shapeName} has unsupported field ${unknownProperty}`);
   }
 
   if (
-    typeof value.kind !== "string" ||
-    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value.kind)
+    typeof value.laneRunId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(value.laneRunId) ||
+    containsCredentialShapedValue(value.laneRunId)
   ) {
-    return failClosedReason(`${shapeName}.kind is malformed`);
-  }
-
-  if (typeof value.path !== "string" || !isPortableLocalArtifactPath(value.path)) {
-    return failClosedReason(`${shapeName}.path is malformed`);
-  }
-
-  for (const field of ["kind", "path", "contentType", "description"]) {
-    const fieldValue = value[field];
-    if (typeof fieldValue === "string" && containsCredentialShapedValue(fieldValue)) {
-      return failClosedReason(`${shapeName}.${field} must not contain credential-shaped values`);
-    }
+    return failClosedReason(`${shapeName}.laneRunId is malformed`);
   }
 
   if (
-    value.contentType !== undefined &&
-    (typeof value.contentType !== "string" ||
-      !/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[A-Za-z0-9_.-]+=[A-Za-z0-9_.+-]+)*$/.test(
-        value.contentType
-      ))
+    typeof value.stateFile !== "string" ||
+    !isPortableLocalArtifactPath(value.stateFile) ||
+    containsCredentialShapedValue(value.stateFile)
   ) {
-    return failClosedReason(`${shapeName}.contentType is malformed`);
+    return failClosedReason(`${shapeName}.stateFile is malformed`);
   }
 
-  if (value.description !== undefined && !isNonEmptyString(value.description, 240)) {
-    return failClosedReason(`${shapeName}.description is malformed`);
+  if (value.evidenceMetadata !== undefined && !Array.isArray(value.evidenceMetadata)) {
+    return failClosedReason(`${shapeName}.evidenceMetadata must be an array`);
   }
 
-  if (value.checksum !== undefined) {
-    if (!isRecord(value.checksum)) {
-      return failClosedReason(`${shapeName}.checksum must be an object`);
-    }
-
-    const checksumUnknownProperty = findUnknownProperty(value.checksum, ["algorithm", "value"]);
-    if (checksumUnknownProperty !== undefined) {
-      return failClosedReason(
-        `${shapeName}.checksum has unsupported field ${checksumUnknownProperty}`
-      );
-    }
-
-    if (value.checksum.algorithm !== "sha256") {
-      return failClosedReason(`${shapeName}.checksum algorithm is unsupported`);
-    }
-
+  const evidenceMetadata = value.evidenceMetadata ?? [];
+  for (const [index, metadataPath] of evidenceMetadata.entries()) {
     if (
-      typeof value.checksum.value !== "string" ||
-      !/^[a-f0-9]{64}$/.test(value.checksum.value) ||
-      containsCredentialShapedValue(value.checksum.value)
+      typeof metadataPath !== "string" ||
+      !isPortableLocalArtifactPath(metadataPath) ||
+      containsCredentialShapedValue(metadataPath)
     ) {
-      return failClosedReason(`${shapeName}.checksum value is malformed`);
+      return failClosedReason(`${shapeName}.evidenceMetadata[${index}] is malformed`);
     }
   }
 
   return undefined;
 };
 
-const sanitizeXGate3LocalArtifact = (value: Record<string, unknown>): Record<string, unknown> => ({
-  kind: value.kind,
-  path: value.path,
-  ...(value.contentType === undefined ? {} : { contentType: value.contentType }),
-  ...(value.description === undefined ? {} : { description: value.description }),
-  ...(value.checksum === undefined ? {} : { checksum: value.checksum })
+const sanitizeXGate3LocalArtifacts = (
+  value: EnsenLoopXGate3RawLocalArtifactsV1
+): EnsenLoopXGate3LocalArtifactsV1 => ({
+  laneRunId: value.laneRunId,
+  stateFile: value.stateFile,
+  evidenceMetadata: [...(value.evidenceMetadata ?? [])]
 });
 
 const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {

@@ -1,0 +1,442 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  dirname,
+  isAbsolute,
+  normalize,
+  parse,
+  relative,
+  resolve,
+  sep
+} from "node:path";
+
+import {
+  createUnsupportedConnectorOperationResult
+} from "./connector.js";
+import type {
+  ConnectorCapabilities,
+  ConnectorResult,
+  ConnectorSubmitRequest
+} from "./connector.js";
+
+export type LocalFileAction = "read" | "write";
+
+export interface LocalFileAllowedRoot {
+  alias: string;
+  path: string;
+}
+
+export interface LocalFileRequest {
+  action: LocalFileAction;
+  rootAlias: string;
+  path: string;
+  content?: string;
+}
+
+export interface LocalFileSubmitRequest extends ConnectorSubmitRequest {
+  idempotencyKey: string;
+  file: LocalFileRequest;
+}
+
+export interface LocalFileReceipt {
+  requestId: string;
+  acceptedAt: string;
+  file: {
+    action: LocalFileAction;
+    rootAlias: string;
+    path: string;
+    bytes: number;
+    summary: string;
+  };
+  output?: {
+    content: string;
+  };
+  evidence: {
+    kind: "local-file-fixture";
+    rootAlias: string;
+    path: string;
+    bytes: number;
+  };
+}
+
+export type LocalFileSubmitResult = ConnectorResult<LocalFileReceipt>;
+
+export interface CreateLocalFileConnectorInput {
+  connectorId?: string;
+  allowedRoots: LocalFileAllowedRoot[];
+  now?: () => string;
+}
+
+export interface LocalFileConnector {
+  identity: {
+    id: string;
+    displayName: string;
+    version: "flow.local-file.v1";
+  };
+  capabilities: ConnectorCapabilities;
+  submit(request: LocalFileSubmitRequest): Promise<LocalFileSubmitResult>;
+  status(request: { requestId: string }): ReturnType<typeof createUnsupportedConnectorOperationResult>;
+  cancel(request: { requestId: string; reason?: string }): ReturnType<typeof createUnsupportedConnectorOperationResult>;
+  fetchEvidence(request: { requestId: string }): ReturnType<typeof createUnsupportedConnectorOperationResult>;
+}
+
+interface NormalizedAllowedRoot {
+  alias: string;
+  path: string;
+}
+
+interface ResolvedLocalFileRequest {
+  file: LocalFileRequest;
+  sanitizedPath: string;
+  absolutePath: string;
+}
+
+interface IdempotencyRecord {
+  receipt: LocalFileReceipt;
+  fingerprint: string;
+}
+
+const defaultStatusReason = "local file connector completes fixture file actions inline";
+const defaultCancelReason = "local file connector does not support cancellation";
+const defaultEvidenceReason = "local file connector returns sanitized evidence from submit only";
+const stableAliasPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const credentialValuePattern = /(authorization|cookie|password|secret|token|api[-_]?key)/i;
+
+export const createLocalFileConnector = (
+  input: CreateLocalFileConnectorInput
+): LocalFileConnector => {
+  const connectorId = input.connectorId ?? "local-file";
+  const now = input.now ?? (() => new Date().toISOString());
+  const allowedRoots = normalizeAllowedRoots(input.allowedRoots);
+  const successfulReceipts = new Map<string, IdempotencyRecord>();
+  const capabilities: ConnectorCapabilities = {
+    submit: { supported: true },
+    status: { supported: false, reason: defaultStatusReason },
+    cancel: { supported: false, reason: defaultCancelReason },
+    fetchEvidence: { supported: false, reason: defaultEvidenceReason }
+  };
+
+  return {
+    identity: {
+      id: connectorId,
+      displayName: "Local File Connector",
+      version: "flow.local-file.v1"
+    },
+    capabilities,
+    async submit(request: LocalFileSubmitRequest): Promise<LocalFileSubmitResult> {
+      const validationError = validateSubmitRequest(request);
+      if (validationError !== undefined) {
+        return invalidRequest(connectorId, validationError);
+      }
+
+      const resolved = resolveLocalFileRequest(request.file, allowedRoots);
+      if (typeof resolved === "string") {
+        return invalidRequest(connectorId, resolved);
+      }
+
+      const fingerprint = fingerprintFileRequest(request, resolved.sanitizedPath);
+      const replayed = successfulReceipts.get(request.idempotencyKey);
+      if (replayed !== undefined) {
+        if (replayed.fingerprint !== fingerprint) {
+          return invalidRequest(
+            connectorId,
+            "local file idempotencyKey reuse must keep workflowId/runId/stepId/action/rootAlias/path/content unchanged"
+          );
+        }
+
+        return {
+          ok: true,
+          connectorId,
+          operation: "submit",
+          value: replayed.receipt
+        };
+      }
+
+      const requestId = `${connectorId}-${request.runId}-${request.stepId}`;
+      const outcome = await executeFileRequest(resolved);
+      if (!outcome.ok) {
+        return {
+          ok: false,
+          connectorId,
+          operation: "submit",
+          error: {
+            code: "execution-failed",
+            message: outcome.message,
+            retryable: outcome.retryable
+          }
+        };
+      }
+
+      const acceptedAt = now();
+      const summary =
+        resolved.file.action === "read"
+          ? "local fixture file read"
+          : "local fixture file written";
+      const receipt: LocalFileReceipt = {
+        requestId,
+        acceptedAt,
+        file: {
+          action: resolved.file.action,
+          rootAlias: resolved.file.rootAlias,
+          path: resolved.sanitizedPath,
+          bytes: outcome.bytes,
+          summary
+        },
+        ...(outcome.content === undefined ? {} : { output: { content: outcome.content } }),
+        evidence: {
+          kind: "local-file-fixture",
+          rootAlias: resolved.file.rootAlias,
+          path: resolved.sanitizedPath,
+          bytes: outcome.bytes
+        }
+      };
+      successfulReceipts.set(request.idempotencyKey, { receipt, fingerprint });
+
+      return {
+        ok: true,
+        connectorId,
+        operation: "submit",
+        value: receipt
+      };
+    },
+    status() {
+      return createUnsupportedConnectorOperationResult({
+        connectorId,
+        operation: "status",
+        reason: defaultStatusReason
+      });
+    },
+    cancel() {
+      return createUnsupportedConnectorOperationResult({
+        connectorId,
+        operation: "cancel",
+        reason: defaultCancelReason
+      });
+    },
+    fetchEvidence() {
+      return createUnsupportedConnectorOperationResult({
+        connectorId,
+        operation: "fetchEvidence",
+        reason: defaultEvidenceReason
+      });
+    }
+  };
+};
+
+const normalizeAllowedRoots = (
+  allowedRoots: LocalFileAllowedRoot[]
+): Map<string, NormalizedAllowedRoot> => {
+  if (!Array.isArray(allowedRoots) || allowedRoots.length === 0) {
+    throw new Error("local file connector requires at least one allowed root");
+  }
+
+  const normalized = new Map<string, NormalizedAllowedRoot>();
+  for (const root of allowedRoots) {
+    if (!isRecord(root)) {
+      throw new Error("local file allowed root must be an object");
+    }
+
+    if (typeof root.alias !== "string" || !stableAliasPattern.test(root.alias)) {
+      throw new Error("local file allowed root alias must be stable kebab-case");
+    }
+
+    if (normalized.has(root.alias)) {
+      throw new Error(`local file allowed root alias ${root.alias} must be unique`);
+    }
+
+    if (typeof root.path !== "string" || root.path.trim() === "") {
+      throw new Error("local file allowed root path must be a non-empty absolute path");
+    }
+
+    if (!isAbsolute(root.path)) {
+      throw new Error("local file allowed root path must be absolute");
+    }
+
+    if (credentialValuePattern.test(root.path)) {
+      throw new Error("local file allowed root path must not contain credential-shaped segments");
+    }
+
+    const rootPath = resolve(root.path);
+    if (rootPath === parse(rootPath).root) {
+      throw new Error("local file allowed root path must not be a filesystem root");
+    }
+
+    normalized.set(root.alias, { alias: root.alias, path: rootPath });
+  }
+
+  return normalized;
+};
+
+const validateSubmitRequest = (request: LocalFileSubmitRequest): string | undefined => {
+  if (typeof request.workflowId !== "string" || request.workflowId.trim().length === 0) {
+    return "local file workflowId must be a non-empty string";
+  }
+
+  if (typeof request.runId !== "string" || request.runId.trim().length === 0) {
+    return "local file runId must be a non-empty string";
+  }
+
+  if (typeof request.stepId !== "string" || request.stepId.trim().length === 0) {
+    return "local file stepId must be a non-empty string";
+  }
+
+  if (typeof request.idempotencyKey !== "string" || request.idempotencyKey.trim().length === 0) {
+    return "local file idempotencyKey must be a non-empty string";
+  }
+
+  if (!isRecord(request.file)) {
+    return "local file request must include a file object";
+  }
+
+  if (request.file.action !== "read" && request.file.action !== "write") {
+    return "local file action must be read or write";
+  }
+
+  if (typeof request.file.rootAlias !== "string" || !stableAliasPattern.test(request.file.rootAlias)) {
+    return "local file rootAlias must be a configured stable alias";
+  }
+
+  if (typeof request.file.path !== "string" || request.file.path.trim() === "") {
+    return "local file path must be a non-empty relative path";
+  }
+
+  if (request.file.action === "write" && typeof request.file.content !== "string") {
+    return "local file write content must be a string";
+  }
+
+  if (request.file.action === "read" && request.file.content !== undefined) {
+    return "local file read request must not include content";
+  }
+
+  return undefined;
+};
+
+const resolveLocalFileRequest = (
+  file: LocalFileRequest,
+  allowedRoots: Map<string, NormalizedAllowedRoot>
+): ResolvedLocalFileRequest | string => {
+  const root = allowedRoots.get(file.rootAlias);
+  if (root === undefined) {
+    return "local file rootAlias is not configured";
+  }
+
+  if (file.path.includes("\\") || isAbsolute(file.path)) {
+    return "local file path must be relative to an allowed root";
+  }
+
+  const normalizedRelativePath = normalize(file.path);
+  if (
+    normalizedRelativePath === ".." ||
+    normalizedRelativePath.startsWith(`..${sep}`)
+  ) {
+    return "local file path must stay under the allowed root";
+  }
+
+  const absolutePath = resolve(root.path, normalizedRelativePath);
+  const relativeToRoot = relative(root.path, absolutePath);
+  if (
+    relativeToRoot === "" ||
+    relativeToRoot === ".." ||
+    relativeToRoot.startsWith(`..${sep}`) ||
+    isAbsolute(relativeToRoot)
+  ) {
+    return "local file path must stay under the allowed root";
+  }
+
+  return {
+    file,
+    sanitizedPath: relativeToRoot.split(sep).join("/"),
+    absolutePath
+  };
+};
+
+const executeFileRequest = async (
+  request: ResolvedLocalFileRequest
+): Promise<
+  | { ok: true; bytes: number; content?: string }
+  | { ok: false; message: string; retryable: boolean }
+> => {
+  if (request.file.action === "read") {
+    try {
+      const content = await readFile(request.absolutePath, "utf8");
+      return { ok: true, bytes: Buffer.byteLength(content, "utf8"), content };
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return {
+          ok: false,
+          message: "local file read target was not found",
+          retryable: true
+        };
+      }
+
+      return {
+        ok: false,
+        message: "local file read failed",
+        retryable: false
+      };
+    }
+  }
+
+  try {
+    await mkdir(dirname(request.absolutePath), { recursive: true });
+    await writeFile(request.absolutePath, request.file.content ?? "", "utf8");
+    return {
+      ok: true,
+      bytes: Buffer.byteLength(request.file.content ?? "", "utf8")
+    };
+  } catch {
+    return {
+      ok: false,
+      message: "local file write failed",
+      retryable: false
+    };
+  }
+};
+
+const invalidRequest = (
+  connectorId: string,
+  message: string
+): LocalFileSubmitResult => ({
+  ok: false,
+  connectorId,
+  operation: "submit",
+  error: {
+    code: "invalid-request",
+    message,
+    retryable: false
+  }
+});
+
+const fingerprintFileRequest = (
+  request: LocalFileSubmitRequest,
+  sanitizedPath: string
+): string =>
+  stableStringify({
+    workflowId: request.workflowId,
+    runId: request.runId,
+    stepId: request.stepId,
+    action: request.file.action,
+    rootAlias: request.file.rootAlias,
+    path: sanitizedPath,
+    content: request.file.content ?? null
+  });
+
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;

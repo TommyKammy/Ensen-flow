@@ -36,6 +36,10 @@ export {
 } from "./http-notification-connector.js";
 
 export {
+  createLocalFileConnector
+} from "./file-connector.js";
+
+export {
   eipVersionBoundary,
   isSupportedEipProtocolVersion
 } from "./eip-version.js";
@@ -124,6 +128,17 @@ export type {
   HttpNotificationTransport,
   HttpNotificationTransportDelivery
 } from "./http-notification-connector.js";
+
+export type {
+  CreateLocalFileConnectorInput,
+  LocalFileAction,
+  LocalFileAllowedRoot,
+  LocalFileConnector,
+  LocalFileReceipt,
+  LocalFileRequest,
+  LocalFileSubmitRequest,
+  LocalFileSubmitResult
+} from "./file-connector.js";
 
 export type { EipVersionBoundary } from "./eip-version.js";
 

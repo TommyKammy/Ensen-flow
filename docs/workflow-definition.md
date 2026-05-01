@@ -66,6 +66,15 @@ The fixture must not include a real URL, customer endpoint, raw secret,
 authorization header, cookie, API key, OAuth token, or provider-specific
 credential. Real outbound HTTP integration is not enabled by this skeleton.
 
+The local file connector skeleton also stays behind the neutral action
+boundary. A workflow may use `action.type: "local"` with a file-oriented action
+name in focused tests, then route the step through `createLocalFileConnector`.
+The connector accepts only explicit safe-root aliases and relative fixture
+paths. It records sanitized alias/path evidence and rejects traversal, absolute
+paths, unsupported actions, and changed idempotency replays. It is not
+unrestricted filesystem automation, lane-state access, repository mutation, or
+production artifact storage.
+
 ## Shape
 
 ```json

@@ -8,7 +8,8 @@ This repository is in the Phase 1 baseline stage. The current package exposes a
 minimal TypeScript scaffold plus the initial standalone workflow definition
 schema, append-only JSONL workflow run state helpers, a local sequential runner,
 neutral audit JSONL events, a bounded local schedule trigger evaluator, and a
-bounded local webhook intake helper. It
+bounded local webhook intake helper, and a bounded local file connector
+skeleton for fixture read/write actions. It
 does not implement executor connectors, Ensen-loop integration, ERPNext
 behavior, or Pharma/GxP workflow packs yet.
 
@@ -37,6 +38,8 @@ authority, and no premature compliance claims.
 
 - `docs/mission.md`: Ensen-flow mission and development charter short form.
 - `docs/workflow-definition.md`: Phase 1 workflow definition schema boundary.
+- `docs/file-connector.md`: local file connector safe-root boundary,
+  idempotency behavior, cleanup ownership, and non-goals.
 - `docs/x-gate2-loop-flow-smoke-runbook.md`: local X-Gate 2 loop-flow smoke
   runbook, expected artifacts, failure classification, and non-production
   boundaries.

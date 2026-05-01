@@ -34,6 +34,26 @@ and the same request fingerprint replays the stored receipt instead of writing a
 second time. Reusing the idempotency key with a changed action, path, root, or
 content fails closed.
 
+By default, `createLocalFileConnector` creates an in-memory idempotency store
+scoped to that connector instance. Callers that recreate connectors during a
+retry must pass a shared or durable `idempotencyStore` so successful receipts
+survive connector recreation:
+
+```ts
+const idempotencyStore = createInMemoryLocalFileIdempotencyStore();
+
+createLocalFileConnector({
+  allowedRoots: [{ alias: "fixture-root", path: "<absolute-temp-fixture-root>" }],
+  idempotencyStore
+});
+```
+
+The bundled in-memory store serializes same-process submissions for one key and
+rejects changed replays. Cross-process workers need a caller-owned durable store
+with equivalent compare-and-set behavior, such as one backed by run state or a
+database record. The connector does not silently infer durability from the
+fixture root.
+
 ## Cleanup
 
 Tests and callers own the temporary fixture root lifecycle. Use a per-run

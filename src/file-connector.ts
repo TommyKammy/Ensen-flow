@@ -60,9 +60,32 @@ export interface LocalFileReceipt {
 
 export type LocalFileSubmitResult = ConnectorResult<LocalFileReceipt>;
 
+export interface LocalFileIdempotencyRecord {
+  receipt: LocalFileReceipt;
+  fingerprint: string;
+}
+
+export type LocalFileIdempotencyStoreResult =
+  | {
+      status: "stored" | "replayed";
+      record: LocalFileIdempotencyRecord;
+    }
+  | {
+      status: "conflict";
+    };
+
+export interface LocalFileIdempotencyStore {
+  submitSuccessfulReceipt(input: {
+    idempotencyKey: string;
+    fingerprint: string;
+    createReceipt: () => Promise<LocalFileReceipt>;
+  }): Promise<LocalFileIdempotencyStoreResult>;
+}
+
 export interface CreateLocalFileConnectorInput {
   connectorId?: string;
   allowedRoots: LocalFileAllowedRoot[];
+  idempotencyStore?: LocalFileIdempotencyStore;
   now?: () => string;
 }
 
@@ -90,16 +113,69 @@ interface ResolvedLocalFileRequest {
   absolutePath: string;
 }
 
-interface IdempotencyRecord {
-  receipt: LocalFileReceipt;
-  fingerprint: string;
-}
-
 const defaultStatusReason = "local file connector completes fixture file actions inline";
 const defaultCancelReason = "local file connector does not support cancellation";
 const defaultEvidenceReason = "local file connector returns sanitized evidence from submit only";
 const stableAliasPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const credentialValuePattern = /(authorization|cookie|password|secret|token|api[-_]?key)/i;
+
+export const createInMemoryLocalFileIdempotencyStore = (): LocalFileIdempotencyStore => {
+  const records = new Map<string, LocalFileIdempotencyRecord>();
+  const pending = new Map<
+    string,
+    {
+      fingerprint: string;
+      promise: Promise<LocalFileIdempotencyStoreResult>;
+    }
+  >();
+
+  return {
+    async submitSuccessfulReceipt(input) {
+      const existing = records.get(input.idempotencyKey);
+      if (existing !== undefined) {
+        return existing.fingerprint === input.fingerprint
+          ? { status: "replayed", record: existing }
+          : { status: "conflict" };
+      }
+
+      const inFlight = pending.get(input.idempotencyKey);
+      if (inFlight !== undefined) {
+        if (inFlight.fingerprint !== input.fingerprint) {
+          return { status: "conflict" };
+        }
+
+        const result = await inFlight.promise;
+        return result.status === "conflict"
+          ? result
+          : { status: "replayed", record: result.record };
+      }
+
+      const promise = (async (): Promise<LocalFileIdempotencyStoreResult> => {
+        const receipt = await input.createReceipt();
+        const record: LocalFileIdempotencyRecord = {
+          receipt,
+          fingerprint: input.fingerprint
+        };
+        records.set(input.idempotencyKey, record);
+        return { status: "stored", record };
+      })();
+
+      pending.set(input.idempotencyKey, {
+        fingerprint: input.fingerprint,
+        promise
+      });
+
+      try {
+        return await promise;
+      } finally {
+        const current = pending.get(input.idempotencyKey);
+        if (current?.promise === promise) {
+          pending.delete(input.idempotencyKey);
+        }
+      }
+    }
+  };
+};
 
 export const createLocalFileConnector = (
   input: CreateLocalFileConnectorInput
@@ -107,7 +183,7 @@ export const createLocalFileConnector = (
   const connectorId = input.connectorId ?? "local-file";
   const now = input.now ?? (() => new Date().toISOString());
   const allowedRoots = normalizeAllowedRoots(input.allowedRoots);
-  const successfulReceipts = new Map<string, IdempotencyRecord>();
+  const idempotencyStore = input.idempotencyStore ?? createInMemoryLocalFileIdempotencyStore();
   const capabilities: ConnectorCapabilities = {
     submit: { supported: true },
     status: { supported: false, reason: defaultStatusReason },
@@ -134,68 +210,47 @@ export const createLocalFileConnector = (
       }
 
       const fingerprint = fingerprintFileRequest(request, resolved.sanitizedPath);
-      const replayed = successfulReceipts.get(request.idempotencyKey);
-      if (replayed !== undefined) {
-        if (replayed.fingerprint !== fingerprint) {
-          return invalidRequest(
+      let storedReceipt: LocalFileIdempotencyStoreResult;
+      try {
+        storedReceipt = await idempotencyStore.submitSuccessfulReceipt({
+          idempotencyKey: request.idempotencyKey,
+          fingerprint,
+          createReceipt: async () => createLocalFileReceipt({
             connectorId,
-            "local file idempotencyKey reuse must keep workflowId/runId/stepId/action/rootAlias/path/content unchanged"
-          );
+            now,
+            request,
+            resolved
+          })
+        });
+      } catch (error) {
+        if (!isLocalFileExecutionError(error)) {
+          throw error;
         }
 
-        return {
-          ok: true,
-          connectorId,
-          operation: "submit",
-          value: replayed.receipt
-        };
-      }
-
-      const requestId = `${connectorId}-${request.runId}-${request.stepId}`;
-      const outcome = await executeFileRequest(resolved);
-      if (!outcome.ok) {
         return {
           ok: false,
           connectorId,
           operation: "submit",
           error: {
             code: "execution-failed",
-            message: outcome.message,
-            retryable: outcome.retryable
+            message: error.message,
+            retryable: error.retryable
           }
         };
       }
 
-      const acceptedAt = now();
-      const summary =
-        resolved.file.action === "read"
-          ? "local fixture file read"
-          : "local fixture file written";
-      const receipt: LocalFileReceipt = {
-        requestId,
-        acceptedAt,
-        file: {
-          action: resolved.file.action,
-          rootAlias: resolved.file.rootAlias,
-          path: resolved.sanitizedPath,
-          bytes: outcome.bytes,
-          summary
-        },
-        ...(outcome.content === undefined ? {} : { output: { content: outcome.content } }),
-        evidence: {
-          kind: "local-file-fixture",
-          rootAlias: resolved.file.rootAlias,
-          path: resolved.sanitizedPath,
-          bytes: outcome.bytes
-        }
-      };
-      successfulReceipts.set(request.idempotencyKey, { receipt, fingerprint });
+      if (storedReceipt.status === "conflict") {
+        return invalidRequest(
+          connectorId,
+          "local file idempotencyKey reuse must keep workflowId/runId/stepId/action/rootAlias/path/content unchanged"
+        );
+      }
 
       return {
         ok: true,
         connectorId,
         operation: "submit",
-        value: receipt
+        value: storedReceipt.record.receipt
       };
     },
     status() {
@@ -218,6 +273,44 @@ export const createLocalFileConnector = (
         operation: "fetchEvidence",
         reason: defaultEvidenceReason
       });
+    }
+  };
+};
+
+const createLocalFileReceipt = async (input: {
+  connectorId: string;
+  now: () => string;
+  request: LocalFileSubmitRequest;
+  resolved: ResolvedLocalFileRequest;
+}): Promise<LocalFileReceipt> => {
+  const outcome = await executeFileRequest(input.resolved);
+  if (!outcome.ok) {
+    throw new LocalFileExecutionError(outcome.message, outcome.retryable);
+  }
+
+  const requestId = `${input.connectorId}-${input.request.runId}-${input.request.stepId}`;
+  const acceptedAt = input.now();
+  const summary =
+    input.resolved.file.action === "read"
+      ? "local fixture file read"
+      : "local fixture file written";
+
+  return {
+    requestId,
+    acceptedAt,
+    file: {
+      action: input.resolved.file.action,
+      rootAlias: input.resolved.file.rootAlias,
+      path: input.resolved.sanitizedPath,
+      bytes: outcome.bytes,
+      summary
+    },
+    ...(outcome.content === undefined ? {} : { output: { content: outcome.content } }),
+    evidence: {
+      kind: "local-file-fixture",
+      rootAlias: input.resolved.file.rootAlias,
+      path: input.resolved.sanitizedPath,
+      bytes: outcome.bytes
     }
   };
 };
@@ -405,6 +498,19 @@ const invalidRequest = (
     retryable: false
   }
 });
+
+class LocalFileExecutionError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "LocalFileExecutionError";
+    this.retryable = retryable;
+  }
+}
+
+const isLocalFileExecutionError = (error: unknown): error is LocalFileExecutionError =>
+  error instanceof LocalFileExecutionError;
 
 const fingerprintFileRequest = (
   request: LocalFileSubmitRequest,

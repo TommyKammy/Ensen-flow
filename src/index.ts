@@ -36,6 +36,7 @@ export {
 } from "./http-notification-connector.js";
 
 export {
+  createInMemoryLocalFileIdempotencyStore,
   createLocalFileConnector
 } from "./file-connector.js";
 
@@ -134,6 +135,9 @@ export type {
   LocalFileAction,
   LocalFileAllowedRoot,
   LocalFileConnector,
+  LocalFileIdempotencyRecord,
+  LocalFileIdempotencyStore,
+  LocalFileIdempotencyStoreResult,
   LocalFileReceipt,
   LocalFileRequest,
   LocalFileSubmitRequest,

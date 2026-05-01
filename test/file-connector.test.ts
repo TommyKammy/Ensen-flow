@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createInMemoryLocalFileIdempotencyStore,
   createLocalFileConnector,
   readWorkflowRunState,
   runWorkflow
@@ -78,9 +79,16 @@ describe("local file connector skeleton", () => {
 
   it("writes local fixture files idempotently without leaking absolute paths", async () => {
     const fixtureRoot = await createTempRoot();
+    const idempotencyStore = createInMemoryLocalFileIdempotencyStore();
     const connector = createLocalFileConnector({
       allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }],
+      idempotencyStore,
       now: () => "2026-05-02T04:01:00.000Z"
+    });
+    const recreatedConnector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }],
+      idempotencyStore,
+      now: () => "2026-05-02T04:01:01.000Z"
     });
     const request: LocalFileSubmitRequest = {
       workflowId: "file-demo",
@@ -96,13 +104,101 @@ describe("local file connector skeleton", () => {
     };
 
     const first = await connector.submit(request);
-    const replay = await connector.submit(request);
+    await writeFile(join(fixtureRoot, "outputs", "result.txt"), "tampered", "utf8");
+    const replay = await recreatedConnector.submit(request);
 
     expect(first).toEqual(replay);
     await expect(readFile(join(fixtureRoot, "outputs", "result.txt"), "utf8")).resolves.toBe(
-      "first write"
+      "tampered"
     );
     expect(JSON.stringify(first)).not.toContain(fixtureRoot);
+  });
+
+  it("rejects changed replays from a shared idempotency store after connector recreation", async () => {
+    const fixtureRoot = await createTempRoot();
+    const idempotencyStore = createInMemoryLocalFileIdempotencyStore();
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }],
+      idempotencyStore
+    });
+    const recreatedConnector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }],
+      idempotencyStore
+    });
+    const request: LocalFileSubmitRequest = {
+      workflowId: "file-demo",
+      runId: "file-demo-run",
+      stepId: "write-fixture",
+      idempotencyKey: "file-demo-run:write-fixture",
+      file: {
+        action: "write",
+        rootAlias: "fixture-root",
+        path: "outputs/result.txt",
+        content: "first write"
+      }
+    };
+
+    await expect(connector.submit(request)).resolves.toMatchObject({ ok: true });
+    await expect(
+      recreatedConnector.submit({
+        ...request,
+        file: {
+          ...request.file,
+          content: "changed write"
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid-request",
+        message:
+          "local file idempotencyKey reuse must keep workflowId/runId/stepId/action/rootAlias/path/content unchanged",
+        retryable: false
+      }
+    });
+  });
+
+  it("serializes concurrent same-key submissions through the shared idempotency store", async () => {
+    const fixtureRoot = await createTempRoot();
+    const idempotencyStore = createInMemoryLocalFileIdempotencyStore();
+    const timestamps = [
+      "2026-05-02T04:01:10.000Z",
+      "2026-05-02T04:01:11.000Z"
+    ];
+    let timestampIndex = 0;
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }],
+      idempotencyStore,
+      now: () => timestamps[Math.min(timestampIndex++, timestamps.length - 1)]
+    });
+    const request: LocalFileSubmitRequest = {
+      workflowId: "file-demo",
+      runId: "file-demo-run",
+      stepId: "write-fixture",
+      idempotencyKey: "file-demo-run:write-fixture",
+      file: {
+        action: "write",
+        rootAlias: "fixture-root",
+        path: "outputs/result.txt",
+        content: "first write"
+      }
+    };
+
+    const [first, second] = await Promise.all([
+      connector.submit(request),
+      connector.submit(request)
+    ]);
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({
+      ok: true,
+      value: {
+        acceptedAt: "2026-05-02T04:01:10.000Z"
+      }
+    });
+    await expect(readFile(join(fixtureRoot, "outputs", "result.txt"), "utf8")).resolves.toBe(
+      "first write"
+    );
   });
 
   it.each([

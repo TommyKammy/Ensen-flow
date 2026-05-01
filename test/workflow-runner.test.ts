@@ -498,14 +498,11 @@ describe("sequential workflow runner", () => {
                 ...(resultStatus === "succeeded"
                   ? {}
                   : { errors: [{ code: resultStatus, message: summary }] }),
-                localArtifacts: [
-                  {
-                    kind: "aggregate-json",
-                    path: "state/x-gate3/aggregate.json",
-                    contentType: "application/json",
-                    description: "Local X-Gate 3 smoke aggregate"
-                  }
-                ],
+                localArtifacts: {
+                  laneRunId: `lane_xgate3_${executorStatus}`,
+                  stateFile: "state/x-gate3/lane-run.jsonl",
+                  evidenceMetadata: ["evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json"]
+                },
                 localArtifactSemantics: "local-development-references-only",
                 productionEvidence: false
               }
@@ -530,12 +527,13 @@ describe("sequential workflow runner", () => {
                     status: resultStatus === "succeeded" ? "passed" : resultStatus,
                     summary
                   },
-                  localArtifacts: [
-                    {
-                      kind: "aggregate-json",
-                      path: "state/x-gate3/aggregate.json"
-                    }
-                  ],
+                  localArtifacts: {
+                    laneRunId: `lane_xgate3_${executorStatus}`,
+                    stateFile: "state/x-gate3/lane-run.jsonl",
+                    evidenceMetadata: [
+                      "evidence/run_01HV7Y8M8F2KQ5W3P9R6T4N2AB-bundle.json"
+                    ]
+                  },
                   localArtifactSemantics: "local-development-references-only",
                   productionEvidence: false
                 }

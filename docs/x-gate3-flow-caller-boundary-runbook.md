@@ -55,7 +55,7 @@ node "$LOOP_ROOT/dist/index.js" x-gate3-smoke <run-request-json-file> --workspac
 ```
 
 The Flow-owned local smoke test creates its own temporary RunRequest input and
-invokes an X-Gate 3-shaped local fake lane process. It is the required focused
+invokes an X-Gate 3-shaped local fake lane process. It is the required smoke
 test for this repository:
 
 ```sh

@@ -11,7 +11,9 @@ import {
   runWorkflow
 } from "../src/index.js";
 import type {
+  HttpNotificationOutcome,
   HttpNotificationSubmitRequest,
+  HttpNotificationTransportDelivery,
   WorkflowDefinition
 } from "../src/index.js";
 
@@ -107,6 +109,79 @@ describe("HTTP notification connector skeleton", () => {
 
     expect(first).toEqual(replay);
     expect(transport.deliveries).toHaveLength(1);
+  });
+
+  it("serializes concurrent same-key submits before transport delivery completes", async () => {
+    const deliveries: HttpNotificationTransportDelivery[] = [];
+    const delivery = createDeferred<HttpNotificationOutcome>();
+    const connector = createHttpNotificationConnector({
+      transport: {
+        deliver(request) {
+          deliveries.push(request);
+          return delivery.promise;
+        }
+      },
+      now: () => "2026-05-02T03:00:00.000Z"
+    });
+
+    const first = connector.submit(notifyRequest);
+    const replay = connector.submit(notifyRequest);
+
+    await Promise.resolve();
+    expect(deliveries).toHaveLength(1);
+
+    delivery.resolve({
+      status: "succeeded",
+      summary: "local fake notification accepted"
+    });
+
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await expect(replay).resolves.toMatchObject({ ok: true });
+    await expect(first).resolves.toEqual(await replay);
+    expect(deliveries).toHaveLength(1);
+  });
+
+  it("fails closed for concurrent same-key submits with a changed fingerprint", async () => {
+    const deliveries: HttpNotificationTransportDelivery[] = [];
+    const delivery = createDeferred<HttpNotificationOutcome>();
+    const connector = createHttpNotificationConnector({
+      transport: {
+        deliver(request) {
+          deliveries.push(request);
+          return delivery.promise;
+        }
+      },
+      now: () => "2026-05-02T03:00:00.000Z"
+    });
+
+    const first = connector.submit(notifyRequest);
+    const changed = await connector.submit({
+      ...notifyRequest,
+      notification: {
+        ...notifyRequest.notification,
+        endpointAlias: "local-operator-escalation"
+      }
+    });
+
+    expect(changed).toMatchObject({
+      ok: false,
+      operation: "submit",
+      error: {
+        code: "invalid-request",
+        retryable: false,
+        message:
+          "HTTP notification idempotencyKey reuse must keep workflowId/runId/stepId/endpointAlias/method/headers/payload unchanged"
+      }
+    });
+    expect(deliveries).toHaveLength(1);
+
+    delivery.resolve({
+      status: "succeeded",
+      summary: "local fake notification accepted"
+    });
+
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(deliveries).toHaveLength(1);
   });
 
   it("rejects idempotency replay when the request shape changes", async () => {
@@ -217,6 +292,43 @@ describe("HTTP notification connector skeleton", () => {
         message: "local fake endpoint is temporarily unavailable"
       }
     });
+  });
+
+  it("does not store a successful replay receipt for failed delivery", async () => {
+    const transport = createFakeHttpNotificationTransport({
+      outcomes: [
+        {
+          status: "failed",
+          summary: "local fake endpoint rejected notification",
+          retryable: false
+        },
+        {
+          status: "succeeded",
+          summary: "local fake notification accepted on retry"
+        }
+      ]
+    });
+    const connector = createHttpNotificationConnector({
+      transport,
+      now: createClock(["2026-05-02T03:00:00.000Z"])
+    });
+
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "execution-failed",
+        message: "local fake endpoint rejected notification"
+      }
+    });
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        notification: {
+          summary: "local fake notification accepted on retry"
+        }
+      }
+    });
+    expect(transport.deliveries).toHaveLength(2);
   });
 
   it("fails closed for unsupported notification submit capability", async () => {
@@ -421,4 +533,16 @@ const createClock = (timestamps: string[]): (() => string) => {
   let index = 0;
 
   return () => timestamps[Math.min(index++, timestamps.length - 1)];
+};
+
+const createDeferred = <T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} => {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+
+  return { promise, resolve };
 };

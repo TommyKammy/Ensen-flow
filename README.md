@@ -7,7 +7,8 @@ A lightweight workflow orchestration engine.
 This repository is in the Phase 1 baseline stage. The current package exposes a
 minimal TypeScript scaffold plus the initial standalone workflow definition
 schema, append-only JSONL workflow run state helpers, a local sequential runner,
-neutral audit JSONL events, and a bounded local schedule trigger evaluator. It
+neutral audit JSONL events, a bounded local schedule trigger evaluator, and a
+bounded local webhook intake helper. It
 does not implement executor connectors, Ensen-loop integration, ERPNext
 behavior, or Pharma/GxP workflow packs yet.
 
@@ -61,6 +62,15 @@ same evaluation returns the existing terminal run instead of creating an
 unexpected duplicate. Ensen-flow does not run a background scheduler daemon, cron
 service integration, cloud scheduler, external calendar integration, or
 production time-zone policy.
+
+Webhook triggers are also local intake boundaries only. A workflow may declare
+`trigger.type: "webhook"` with a stable local path, and callers may pass a
+placeholder-only `flow.webhook.input.v1` fixture to `consumeWebhookInput`. The
+helper validates bounded metadata, rejects credential-shaped or forwarded
+boundary headers, derives an idempotent run state path from `requestId`, and
+records `trigger.type: "webhook"` in JSONL run state. It does not start an HTTP
+server, expose a public endpoint, validate production signatures, store raw
+secrets, or trust client-supplied identity/proxy headers.
 
 ## Workflow Run JSONL State
 

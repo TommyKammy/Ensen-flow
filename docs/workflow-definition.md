@@ -36,6 +36,18 @@ run ID and JSONL state path, and preserve trigger idempotency. This is not a
 long-running scheduler daemon, cron service integration, cloud scheduler,
 external calendar integration, or production time-zone policy.
 
+Webhook triggers are intentionally small too. The schema accepts only a local
+`webhook` trigger with a stable local `path`. The runtime helper
+`consumeWebhookInput` accepts a local `flow.webhook.input.v1` object, validates
+the request metadata and payload before persistence, derives a deterministic run
+ID and JSONL state path from `requestId`, and records webhook intake as
+`trigger.type: "webhook"` with webhook context in run state. Malformed input,
+path mismatches, untrusted forwarded headers, credential-shaped headers, and
+credential-shaped payload keys fail closed before run or audit files are
+written. This boundary is not a production HTTP service, public endpoint,
+tunnel, hosted listener, raw secret store, signature validation service, or
+credential vault integration.
+
 Runner audit output is intentionally separate from the workflow definition
 schema. The Phase 1 runner writes an internal neutral JSONL audit shape for
 local lifecycle activity only; a formal mapping to EIP AuditEvent is deferred to
@@ -113,8 +125,55 @@ A bounded schedule trigger uses the same workflow shape with a schedule trigger:
 }
 ```
 
+A bounded webhook trigger uses the same workflow shape with a local path and an
+input idempotency key:
+
+```json
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "local-webhook-demo",
+  "trigger": {
+    "type": "webhook",
+    "path": "/hooks/local-demo",
+    "idempotencyKey": {
+      "source": "input",
+      "field": "requestId",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "record-webhook",
+      "action": {
+        "type": "local",
+        "name": "record_webhook"
+      }
+    }
+  ]
+}
+```
+
+The matching local webhook input fixture is placeholder-only:
+
+```json
+{
+  "schemaVersion": "flow.webhook.input.v1",
+  "requestId": "webhook-001",
+  "path": "/hooks/local-demo",
+  "receivedAt": "2026-05-02T01:00:00.000Z",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "payload": {
+    "eventType": "local-demo.created",
+    "subject": "placeholder-subject"
+  }
+}
+```
+
 The canonical fixture set lives in `fixtures/workflow-definitions/`. Tests load
-those fixtures and validate them through `validateWorkflowDefinition`.
+those fixtures and validate them through `validateWorkflowDefinition`. Local
+webhook input fixtures live in `fixtures/webhook-inputs/`.
 
 ## Validation
 

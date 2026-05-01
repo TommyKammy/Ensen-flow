@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -865,6 +865,162 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
           failureClass: expectedClass,
           operation: "submit"
         });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("invokes X-Gate 3 smoke with explicit local roots and cleans the request file", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-roots-"));
+    const cliPath = join(tempRoot, "loop-x-gate3-cli.mjs");
+    const observedArgsPath = join(tempRoot, "observed-args.json");
+    const workspaceRoot = join(tempRoot, "workspace-root");
+    const stateRoot = join(tempRoot, "state-root");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "import { readFileSync, writeFileSync } from 'node:fs';",
+        "const observedArgsPath = process.env.OBSERVED_ARGS_PATH;",
+        "const command = process.argv[2];",
+        "const requestPath = process.argv[3];",
+        "const workspaceFlag = process.argv[4];",
+        "const stateFlag = process.argv[6];",
+        "if (observedArgsPath === undefined) throw new Error('missing observed args path');",
+        "writeFileSync(observedArgsPath, JSON.stringify({ args: process.argv.slice(2), requestPath }));",
+        "if (command !== 'x-gate3-smoke' || requestPath === undefined || workspaceFlag !== '--workspace-root' || stateFlag !== '--state-root') {",
+        "  process.stderr.write('expected x-gate3-smoke <run-request-json-file> --workspace-root <workspace-root> --state-root <state-root>');",
+        "  process.exitCode = 2;",
+        "} else {",
+        "  const request = JSON.parse(readFileSync(requestPath, 'utf8'));",
+        "  process.stdout.write(JSON.stringify({",
+        "    schemaVersion: 'ensen-loop.x-gate3-local-lane-smoke.v1',",
+        "    boundary: 'local-cli-bounded-fake-lane',",
+        "    requestId: request.id,",
+        "    correlationId: request.correlationId,",
+        "    mutatesRepository: false,",
+        "    invokesProvider: false,",
+        "    startsAgentProviderSession: false,",
+        "    writesProductionEvidenceArchive: false,",
+        "    statusSnapshot: {",
+        "      schemaVersion: 'eip.run-status.v1',",
+        "      id: 'sts_cli_loop_xgate3_roots',",
+        "      requestId: request.id,",
+        "      correlationId: request.correlationId,",
+        "      status: 'completed',",
+        "      observedAt: '2026-05-01T04:00:02.000Z'",
+        "    },",
+        "    runResult: {",
+        "      schemaVersion: 'eip.run-result.v1',",
+        "      id: 'run_cli_loop_xgate3_roots',",
+        "      requestId: request.id,",
+        "      correlationId: request.correlationId,",
+        "      status: 'succeeded',",
+        "      completedAt: '2026-05-01T04:00:03.000Z',",
+        "      verification: { status: 'passed', summary: 'Loop X-Gate 3 local fake lane succeeded.' }",
+        "    },",
+        "    localArtifacts: [",
+        "      { kind: 'aggregate-json', path: 'state/x-gate3/aggregate.json' },",
+        "      { kind: 'log', path: 'state/x-gate3/loop.log' }",
+        "    ]",
+        "  }));",
+        "}",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath],
+        env: {
+          ...process.env,
+          OBSERVED_ARGS_PATH: observedArgsPath
+        },
+        xGate3Smoke: {
+          workspaceRoot,
+          stateRoot
+        }
+      });
+
+      await expect(transport.submitRunRequest(createSmokeRunRequest())).resolves.toMatchObject({
+        requestId: "req_cli_loop_smoke"
+      });
+
+      const observed = JSON.parse(await readFile(observedArgsPath, "utf8")) as {
+        args: string[];
+        requestPath: string;
+      };
+      expect(observed.args).toEqual([
+        "x-gate3-smoke",
+        observed.requestPath,
+        "--workspace-root",
+        workspaceRoot,
+        "--state-root",
+        stateRoot
+      ]);
+      await expect(readFile(observed.requestPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "empty workspace root",
+      workspaceRoot: (_tempRoot: string) => "",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "relative workspace root",
+      workspaceRoot: (_tempRoot: string) => "workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "URL-style workspace root",
+      workspaceRoot: (_tempRoot: string) => "https://example.test/workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "scheme-like workspace root",
+      workspaceRoot: (_tempRoot: string) => "flow-root:workspace-root",
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "traversal-style workspace root",
+      workspaceRoot: (tempRoot: string) => `${join(tempRoot, "workspace-root")}/../other-root`,
+      stateRoot: (tempRoot: string) => join(tempRoot, "state-root")
+    },
+    {
+      name: "credential-shaped state root",
+      workspaceRoot: (tempRoot: string) => join(tempRoot, "workspace-root"),
+      stateRoot: (tempRoot: string) => `${join(tempRoot, "state-root")}?token=sample-secret`
+    }
+  ])("rejects unsafe X-Gate 3 local roots before invoking Loop: $name", async ({
+    workspaceRoot,
+    stateRoot
+  }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-root-guard-"));
+    const transport = createCliEnsenLoopEipExecutorTransport({
+      command: "unused-loop-cli",
+      xGate3Smoke: {
+        workspaceRoot: workspaceRoot(tempRoot),
+        stateRoot: stateRoot(tempRoot)
+      }
+    });
+
+    try {
+      await expect(transport.submitRunRequest(createSmokeRunRequest())).rejects.toMatchObject({
+        failureClass: "flow-gap",
+        operation: "submit",
+        message:
+          "Ensen-loop X-Gate 3 smoke roots must be non-empty absolute local path strings without traversal or credential-shaped values"
+      });
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 
 import {
   createExecutorConnectorCapabilities,
@@ -101,6 +101,10 @@ export interface CreateCliEnsenLoopEipExecutorTransportInput {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  xGate3Smoke?: {
+    workspaceRoot: string;
+    stateRoot: string;
+  };
 }
 
 export interface CreateEnsenLoopEipExecutorConnectorInput {
@@ -155,7 +159,7 @@ export const createCliEnsenLoopEipExecutorTransport = (
 
   return {
     async submitRunRequest(request: EipRunRequestV1) {
-      const aggregate = await invokeEnsenLoopXGate2SmokeCli(input, request);
+      const aggregate = await invokeEnsenLoopSmokeCli(input, request);
       smokeAggregates.set(request.id, aggregate);
 
       return {
@@ -414,11 +418,11 @@ export const createEnsenLoopEipExecutorConnector = (
   };
 };
 
-const invokeEnsenLoopXGate2SmokeCli = async (
+const invokeEnsenLoopSmokeCli = async (
   input: CreateCliEnsenLoopEipExecutorTransportInput,
   request: EipRunRequestV1
 ): Promise<EnsenLoopSmokeAggregateV1> => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-x-gate2-smoke-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-loop-smoke-"));
   const requestPath = join(tempRoot, "run-request.json");
 
   try {
@@ -426,7 +430,7 @@ const invokeEnsenLoopXGate2SmokeCli = async (
     const cliResult = await invokeJsonCli({
       input: {
         ...input,
-        args: [...(input.args ?? []), requestPath]
+        args: createSmokeCliArgs(input, requestPath)
       },
       operation: "submit",
       allowNonZeroJsonStdout: true,
@@ -465,6 +469,35 @@ const invokeEnsenLoopXGate2SmokeCli = async (
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+};
+
+const createSmokeCliArgs = (
+  input: CreateCliEnsenLoopEipExecutorTransportInput,
+  requestPath: string
+): string[] => {
+  if (input.xGate3Smoke === undefined) {
+    return [...(input.args ?? []), requestPath];
+  }
+
+  const { workspaceRoot, stateRoot } = input.xGate3Smoke;
+  if (!isUsableLocalRoot(workspaceRoot) || !isUsableLocalRoot(stateRoot)) {
+    throw new EnsenLoopCliTransportError({
+      message:
+        "Ensen-loop X-Gate 3 smoke roots must be non-empty absolute local path strings without traversal or credential-shaped values",
+      failureClass: "flow-gap",
+      operation: "submit"
+    });
+  }
+
+  return [
+    ...(input.args ?? []),
+    "x-gate3-smoke",
+    requestPath,
+    "--workspace-root",
+    workspaceRoot,
+    "--state-root",
+    stateRoot
+  ];
 };
 
 const requireSmokeAggregate = (
@@ -1954,6 +1987,30 @@ const isIsoDateTimeUtc = (value: unknown): boolean =>
 
 const isNonEmptyString = (value: unknown, maxLength: number): boolean =>
   typeof value === "string" && value.length > 0 && value.length <= maxLength;
+
+const isUsableLocalRoot = (value: unknown): boolean => {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.includes("\0") ||
+    containsCredentialShapedValue(value) ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) ||
+    value.includes("://") ||
+    !isAbsolute(value)
+  ) {
+    return false;
+  }
+
+  const normalized = normalize(value);
+  if (!isAbsolute(normalized) || normalized.includes("\0")) {
+    return false;
+  }
+
+  const hasTraversalSegment = (candidate: string): boolean =>
+    candidate.split(/[\\/]+/).includes("..");
+
+  return !hasTraversalSegment(value) && !hasTraversalSegment(normalized);
+};
 
 const isLocalEvidencePath = (value: string): boolean =>
   /^(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(

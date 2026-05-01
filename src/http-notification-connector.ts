@@ -186,7 +186,7 @@ export const createHttpNotificationConnector = (
 
       const attempt = request.attempt ?? 1;
       const requestId = formatRequestId(connectorId, request.runId, request.stepId, attempt);
-      const submission = (async (): Promise<HttpNotificationSubmitResult> => {
+      const submission = Promise.resolve().then(async (): Promise<HttpNotificationSubmitResult> => {
         const outcome = await input.transport.deliver({
           workflowId: request.workflowId,
           runId: request.runId,
@@ -246,7 +246,7 @@ export const createHttpNotificationConnector = (
           operation: "submit",
           value: receipt
         };
-      })();
+      });
 
       pendingSubmissions.set(request.idempotencyKey, {
         fingerprint,

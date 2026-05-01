@@ -141,6 +141,35 @@ describe("HTTP notification connector skeleton", () => {
     expect(deliveries).toHaveLength(1);
   });
 
+  it("preinstalls the in-flight reservation before synchronously re-entrant delivery callbacks", async () => {
+    const deliveries: HttpNotificationTransportDelivery[] = [];
+    let reentrant: Promise<unknown> | undefined;
+    let connector: ReturnType<typeof createHttpNotificationConnector>;
+
+    connector = createHttpNotificationConnector({
+      transport: {
+        deliver(request) {
+          deliveries.push(request);
+          reentrant = connector.submit(notifyRequest);
+
+          return {
+            status: "succeeded",
+            summary: "local fake notification accepted"
+          };
+        }
+      },
+      now: () => "2026-05-02T03:00:00.000Z"
+    });
+
+    const first = connector.submit(notifyRequest);
+    const firstResult = await first;
+
+    expect(firstResult).toMatchObject({ ok: true });
+    expect(reentrant).toBeDefined();
+    await expect(reentrant).resolves.toEqual(firstResult);
+    expect(deliveries).toHaveLength(1);
+  });
+
   it("fails closed for concurrent same-key submits with a changed fingerprint", async () => {
     const deliveries: HttpNotificationTransportDelivery[] = [];
     const delivery = createDeferred<HttpNotificationOutcome>();

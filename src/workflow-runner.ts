@@ -37,6 +37,7 @@ export interface RunWorkflowInput {
   auditPath?: string;
   runId?: string;
   triggerContext?: Record<string, unknown>;
+  existingRunStateGuard?: (existingState: WorkflowRunState) => void;
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
 }
@@ -103,6 +104,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const existingState = await readExistingRunState(input.statePath);
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
+    input.existingRunStateGuard?.(existingState);
     if (existingState.run.terminalState !== undefined) {
       return existingState;
     }
@@ -111,18 +113,32 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
   const triggerReceivedAt = now();
   const createdAt = now();
-  await createWorkflowRun(input.statePath, {
-    runId,
-    workflowId: input.definition.id,
-    workflowVersion: workflowDefinitionSchemaVersion,
-    trigger: {
-      type: input.definition.trigger.type,
-      receivedAt: triggerReceivedAt,
-      context: triggerContext,
-      ...(triggerIdempotencyKey === undefined ? {} : { idempotencyKey: triggerIdempotencyKey })
-    },
-    createdAt
-  });
+  try {
+    await createWorkflowRun(input.statePath, {
+      runId,
+      workflowId: input.definition.id,
+      workflowVersion: workflowDefinitionSchemaVersion,
+      trigger: {
+        type: input.definition.trigger.type,
+        receivedAt: triggerReceivedAt,
+        context: triggerContext,
+        ...(triggerIdempotencyKey === undefined ? {} : { idempotencyKey: triggerIdempotencyKey })
+      },
+      createdAt
+    });
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "EEXIST") {
+      throw error;
+    }
+
+    const competingState = await readWorkflowRunState(input.statePath);
+    assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
+    input.existingRunStateGuard?.(competingState);
+    if (competingState.run.terminalState !== undefined) {
+      return competingState;
+    }
+    throw new Error("workflow run state already exists but is not terminal; resume is out of scope");
+  }
   await auditWriter?.write({
     type: "workflow.started",
     occurredAt: createdAt

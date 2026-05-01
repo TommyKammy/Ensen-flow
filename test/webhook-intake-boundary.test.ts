@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   consumeWebhookInput,
   readWorkflowRunState,
-  validateWorkflowDefinition
+  validateWorkflowDefinition,
+  WebhookIntakeRejectedError
 } from "../src/index.js";
 import type { WorkflowDefinition, WebhookInput } from "../src/index.js";
 
@@ -45,6 +46,23 @@ const readAuditEvents = async (auditPath: string): Promise<Array<Record<string, 
     .trimEnd()
     .split("\n")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const removePersistedWebhookInputFingerprint = async (statePath: string): Promise<void> => {
+  const events = (await readFile(statePath, "utf8"))
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const trigger = events[0]?.trigger;
+  if (!isRecord(trigger) || !isRecord(trigger.context) || !isRecord(trigger.context.webhook)) {
+    throw new Error("fixture state must include webhook trigger context");
+  }
+
+  delete trigger.context.webhook.inputFingerprint;
+  await writeFile(statePath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -97,6 +115,7 @@ describe("webhook intake boundary", () => {
       receivedAt: "2026-05-02T01:00:01.000Z",
       context: {
         webhook: {
+          inputFingerprint: expect.any(String),
           path: "/hooks/local-demo",
           receivedAt: "2026-05-02T01:00:00.000Z",
           headers: {
@@ -136,6 +155,181 @@ describe("webhook intake boundary", () => {
       id: `audit.${expectedRunId}.000001`,
       run: { id: expectedRunId }
     });
+  });
+
+  it("replays legacy webhook run state without a stored fingerprint when normalized input is unchanged", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const input = createWebhookInput();
+
+    const first = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input
+    });
+    const statePath = join(stateRoot, `${first.run.runId}.jsonl`);
+    await removePersistedWebhookInputFingerprint(statePath);
+    const legacyState = await readWorkflowRunState(statePath);
+    const auditBeforeReplay = await readAuditEvents(auditPath);
+
+    const replay = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input: createWebhookInput()
+    });
+
+    expect(replay).toEqual(legacyState);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    expect(await readWorkflowRunState(statePath)).toEqual(legacyState);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+  });
+
+  it("rejects reused requestIds when normalized webhook payload changes without writing audit events", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const firstInput = createWebhookInput();
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+
+    const first = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input: firstInput
+    });
+    const auditBeforeReplay = await readAuditEvents(auditPath);
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    const persisted = await readWorkflowRunState(join(stateRoot, `${first.run.runId}.jsonl`));
+    expect(persisted).toEqual(first);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+  });
+
+  it("rejects concurrent reused requestIds when normalized webhook payload changes", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const firstInput = createWebhookInput();
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+
+    const results = await Promise.allSettled([
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: firstInput
+      }),
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ]);
+
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof consumeWebhookInput>>> =>
+        result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.reason).toBeInstanceOf(WebhookIntakeRejectedError);
+    expect(rejected[0]!.reason.message).toBe(
+      "webhook requestId reuse must keep normalized input unchanged"
+    );
+
+    const persisted = await readWorkflowRunState(
+      join(stateRoot, `${fulfilled[0]!.value.run.runId}.jsonl`)
+    );
+    expect(persisted).toEqual(fulfilled[0]!.value);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "run.completed"
+    ]);
+    expect((await readAuditEvents(auditPath)).map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
+  });
+
+  it("rejects reused requestIds when normalized webhook headers or receivedAt change", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const firstInput = createWebhookInput();
+    const changedHeaders = createWebhookInput();
+    changedHeaders.headers = {
+      "content-type": "application/json",
+      "x-event-type": "local-demo.updated"
+    };
+    const changedReceivedAt = createWebhookInput();
+    changedReceivedAt.receivedAt = "2026-05-02T01:00:01.000Z";
+
+    await consumeWebhookInput({
+      definition,
+      stateRoot,
+      input: firstInput
+    });
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        input: changedHeaders
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        input: changedReceivedAt
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
   });
 
   it("keeps distinct requestIds with the same normalized slug in separate runs", async () => {

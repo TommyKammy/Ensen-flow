@@ -84,21 +84,26 @@ export const consumeWebhookInput = async (
   const definition = assertWebhookWorkflow(options.definition);
   const normalizedInput = normalizeWebhookInput(options.input, definition.trigger.path);
   const runId = createWebhookRunId(definition.id, normalizedInput.requestId);
+  const statePath = join(options.stateRoot, `${runId}.jsonl`);
+  const inputFingerprint = createWebhookInputFingerprint(normalizedInput);
 
   return runWorkflow({
     definition,
-    statePath: join(options.stateRoot, `${runId}.jsonl`),
+    statePath,
     auditPath: options.auditPath,
     runId,
     triggerContext: {
       requestId: normalizedInput.requestId,
       webhook: {
+        inputFingerprint,
         path: normalizedInput.path,
         receivedAt: normalizedInput.receivedAt,
         ...(normalizedInput.headers === undefined ? {} : { headers: normalizedInput.headers }),
         payload: normalizedInput.payload
       }
     },
+    existingRunStateGuard: (existingState) =>
+      assertWebhookInputMatchesState(existingState, inputFingerprint),
     now: options.now,
     stepHandler: options.stepHandler
   });
@@ -295,6 +300,109 @@ const rejectCredentialShapedValue = (value: unknown, path: string): void => {
 
 const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string): void => {
   rejectCredentialShapedValue(value, path);
+};
+
+const assertWebhookInputMatchesState = (
+  existingState: WorkflowRunState,
+  inputFingerprint: string
+): void => {
+  const existingFingerprint =
+    readStoredWebhookInputFingerprint(existingState) ??
+    deriveLegacyWebhookInputFingerprint(existingState);
+  if (existingFingerprint !== inputFingerprint) {
+    throw new WebhookIntakeRejectedError(
+      "webhook requestId reuse must keep normalized input unchanged"
+    );
+  }
+};
+
+const readStoredWebhookInputFingerprint = (state: WorkflowRunState): string | undefined => {
+  const triggerContext = state.run.trigger.context;
+  if (triggerContext === undefined) {
+    return undefined;
+  }
+
+  const webhook = triggerContext.webhook;
+  if (!isRecord(webhook)) {
+    return undefined;
+  }
+
+  return typeof webhook.inputFingerprint === "string" ? webhook.inputFingerprint : undefined;
+};
+
+const deriveLegacyWebhookInputFingerprint = (
+  state: WorkflowRunState
+): string | undefined => {
+  const triggerContext = state.run.trigger.context;
+  if (!isRecord(triggerContext) || !isRecord(triggerContext.webhook)) {
+    return undefined;
+  }
+
+  const webhook = triggerContext.webhook;
+  const requestId = triggerContext.requestId;
+  const headers = readLegacyWebhookHeaders(webhook.headers);
+  if (
+    typeof requestId !== "string" ||
+    typeof webhook.path !== "string" ||
+    typeof webhook.receivedAt !== "string" ||
+    !isRecord(webhook.payload) ||
+    headers === null
+  ) {
+    return undefined;
+  }
+
+  return createWebhookInputFingerprint({
+    schemaVersion: WEBHOOK_INPUT_SCHEMA_VERSION,
+    requestId,
+    path: webhook.path,
+    receivedAt: webhook.receivedAt,
+    ...(headers === undefined ? {} : { headers }),
+    payload: webhook.payload
+  });
+};
+
+const readLegacyWebhookHeaders = (
+  value: unknown
+): Record<string, string> | undefined | null => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(value)) {
+    if (typeof headerValue !== "string") {
+      return null;
+    }
+    headers[key] = headerValue;
+  }
+
+  return headers;
+};
+
+const createWebhookInputFingerprint = (input: WebhookInput): string =>
+  createHash("sha256")
+    .update(stableStringify(input))
+    .digest("hex");
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  );
+  return `{${entries
+    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
+    .join(",")}}`;
 };
 
 const createWebhookRunId = (workflowId: string, requestId: string): string => {

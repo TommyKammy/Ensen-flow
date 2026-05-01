@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { WorkflowRunState } from "./workflow-run-state.js";
-import { readWorkflowRunState } from "./workflow-run-state.js";
 import { validateWorkflowDefinition } from "./workflow-definition.js";
 import type { WorkflowDefinition } from "./workflow-definition.js";
 import { runWorkflow } from "./workflow-runner.js";
@@ -88,8 +87,6 @@ export const consumeWebhookInput = async (
   const statePath = join(options.stateRoot, `${runId}.jsonl`);
   const inputFingerprint = createWebhookInputFingerprint(normalizedInput);
 
-  await assertExistingWebhookInputMatches(statePath, inputFingerprint);
-
   return runWorkflow({
     definition,
     statePath,
@@ -105,6 +102,8 @@ export const consumeWebhookInput = async (
         payload: normalizedInput.payload
       }
     },
+    existingRunStateGuard: (existingState) =>
+      assertWebhookInputMatchesState(existingState, inputFingerprint),
     now: options.now,
     stepHandler: options.stepHandler
   });
@@ -303,15 +302,10 @@ const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string
   rejectCredentialShapedValue(value, path);
 };
 
-const assertExistingWebhookInputMatches = async (
-  statePath: string,
+const assertWebhookInputMatchesState = (
+  existingState: WorkflowRunState,
   inputFingerprint: string
-): Promise<void> => {
-  const existingState = await readExistingWebhookRunState(statePath);
-  if (existingState === undefined) {
-    return;
-  }
-
+): void => {
   const existingFingerprint =
     readStoredWebhookInputFingerprint(existingState) ??
     deriveLegacyWebhookInputFingerprint(existingState);
@@ -319,20 +313,6 @@ const assertExistingWebhookInputMatches = async (
     throw new WebhookIntakeRejectedError(
       "webhook requestId reuse must keep normalized input unchanged"
     );
-  }
-};
-
-const readExistingWebhookRunState = async (
-  statePath: string
-): Promise<WorkflowRunState | undefined> => {
-  try {
-    return await readWorkflowRunState(statePath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return undefined;
-    }
-
-    throw error;
   }
 };
 
@@ -447,6 +427,3 @@ const isStrictUtcMillisTimestamp = (value: string): boolean => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
-  error instanceof Error && "code" in error;

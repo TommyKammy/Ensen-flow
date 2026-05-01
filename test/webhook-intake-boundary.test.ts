@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   consumeWebhookInput,
   readWorkflowRunState,
-  validateWorkflowDefinition
+  validateWorkflowDefinition,
+  WebhookIntakeRejectedError
 } from "../src/index.js";
 import type { WorkflowDefinition, WebhookInput } from "../src/index.js";
 
@@ -234,6 +235,65 @@ describe("webhook intake boundary", () => {
     const persisted = await readWorkflowRunState(join(stateRoot, `${first.run.runId}.jsonl`));
     expect(persisted).toEqual(first);
     expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+  });
+
+  it("rejects concurrent reused requestIds when normalized webhook payload changes", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const firstInput = createWebhookInput();
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+
+    const results = await Promise.allSettled([
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: firstInput
+      }),
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ]);
+
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof consumeWebhookInput>>> =>
+        result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.reason).toBeInstanceOf(WebhookIntakeRejectedError);
+    expect(rejected[0]!.reason.message).toBe(
+      "webhook requestId reuse must keep normalized input unchanged"
+    );
+
+    const persisted = await readWorkflowRunState(
+      join(stateRoot, `${fulfilled[0]!.value.run.runId}.jsonl`)
+    );
+    expect(persisted).toEqual(fulfilled[0]!.value);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "run.completed"
+    ]);
+    expect((await readAuditEvents(auditPath)).map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
   });
 
   it("rejects reused requestIds when normalized webhook headers or receivedAt change", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { WorkflowRunState } from "./workflow-run-state.js";
@@ -273,20 +274,38 @@ const validateBoundedJson = (value: unknown, path: string, depth: number): void 
   throw new WebhookIntakeRejectedError(`${path} must contain only JSON values`);
 };
 
-const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string): void => {
+const rejectCredentialShapedValue = (value: unknown, path: string): void => {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => rejectCredentialShapedValue(item, `${path}[${index}]`));
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
   for (const [key, nestedValue] of Object.entries(value)) {
     if (CREDENTIAL_KEY_PATTERN.test(key)) {
       throw new WebhookIntakeRejectedError(`${path}.${key} looks credential-shaped`);
     }
 
-    if (isRecord(nestedValue)) {
-      rejectCredentialShapedKeys(nestedValue, `${path}.${key}`);
-    }
+    rejectCredentialShapedValue(nestedValue, `${path}.${key}`);
   }
 };
 
-const createWebhookRunId = (workflowId: string, requestId: string): string =>
-  `${workflowId}-webhook-${requestId.toLowerCase().replaceAll(/[^a-z0-9-]+/g, "-")}`;
+const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string): void => {
+  rejectCredentialShapedValue(value, path);
+};
+
+const createWebhookRunId = (workflowId: string, requestId: string): string => {
+  const slug =
+    requestId
+      .toLowerCase()
+      .replaceAll(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "request";
+  const fingerprint = createHash("sha256").update(requestId).digest("hex").slice(0, 12);
+  return `${workflowId}-webhook-${slug}-${fingerprint}`;
+};
 
 const isStrictUtcMillisTimestamp = (value: string): boolean => {
   const match = ISO_UTC_MILLIS_TIMESTAMP_PATTERN.exec(value);

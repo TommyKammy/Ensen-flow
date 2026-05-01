@@ -492,6 +492,328 @@ describe("CLI-backed Ensen-loop executor smoke", () => {
     }
   });
 
+  it.each([
+    {
+      status: "succeeded",
+      runStatus: "completed",
+      summary: "Loop X-Gate 3 local fake lane succeeded."
+    },
+    {
+      status: "failed",
+      runStatus: "failed",
+      summary: "Loop X-Gate 3 local fake lane failed."
+    },
+    {
+      status: "blocked",
+      runStatus: "blocked",
+      summary: "Loop X-Gate 3 local fake lane blocked."
+    }
+  ])("consumes a valid X-Gate 3 local lane aggregate with $status result", async ({
+    status,
+    runStatus,
+    summary
+  }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-"));
+    const cliPath = join(tempRoot, "loop-x-gate3-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        "import { readFileSync } from 'node:fs';",
+        "const requestPath = process.argv[3];",
+        "const request = JSON.parse(readFileSync(requestPath, 'utf8'));",
+        "process.stdout.write(JSON.stringify({",
+        "  ...createXGate3Aggregate(request.id, request.correlationId),",
+        `  statusSnapshot: { ...createXGate3Aggregate(request.id, request.correlationId).statusSnapshot, status: ${JSON.stringify(runStatus)}, message: ${JSON.stringify(summary)} },`,
+        `  runResult: { ...createXGate3Aggregate(request.id, request.correlationId).runResult, status: ${JSON.stringify(status)}, verification: { status: ${JSON.stringify(status)}, summary: ${JSON.stringify(summary)} } }`,
+        "}));",
+        `if (${JSON.stringify(status)} === 'blocked') process.exitCode = 1;`,
+        `if (${JSON.stringify(status)} === 'failed') process.exitCode = 2;`,
+        "function createXGate3Aggregate(requestId, correlationId) { return {",
+        "  schemaVersion: 'ensen-loop.x-gate3-local-lane-smoke.v1',",
+        "  boundary: 'local-cli-bounded-fake-lane',",
+        "  requestId,",
+        "  correlationId,",
+        "  mutatesRepository: false,",
+        "  invokesProvider: false,",
+        "  startsAgentProviderSession: false,",
+        "  writesProductionEvidenceArchive: false,",
+        "  statusSnapshot: {",
+        "    schemaVersion: 'eip.run-status.v1',",
+        "    id: 'sts_cli_loop_xgate3',",
+        "    requestId,",
+        "    correlationId,",
+        "    status: 'completed',",
+        "    observedAt: '2026-05-01T04:00:02.000Z'",
+        "  },",
+        "  runResult: {",
+        "    schemaVersion: 'eip.run-result.v1',",
+        "    id: 'run_cli_loop_xgate3',",
+        "    requestId,",
+        "    correlationId,",
+        "    status: 'succeeded',",
+        "    completedAt: '2026-05-01T04:00:03.000Z',",
+        "    verification: {",
+        "      status: 'passed',",
+        "      summary: 'Loop X-Gate 3 local fake lane succeeded.'",
+        "    }",
+        "  },",
+        "  localArtifacts: [",
+        "    {",
+        "      kind: 'aggregate-json',",
+        "      path: 'state/x-gate3/aggregate.json',",
+        "      contentType: 'application/json',",
+        "      description: 'Local X-Gate 3 smoke aggregate'",
+        "    },",
+        "    {",
+        "      kind: 'log',",
+        "      path: 'state/x-gate3/loop.log',",
+        "      contentType: 'text/plain'",
+        "    }",
+        "  ]",
+        "}; }",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const connector = createEnsenLoopEipExecutorConnector({
+        transport: createCliEnsenLoopEipExecutorTransport({
+          command: process.execPath,
+          args: [cliPath, "x-gate3-smoke"]
+        })
+      });
+
+      const submitted = await connector.submit({
+        workflow: {
+          id: "cli-loop-smoke",
+          version: "flow.workflow.v1"
+        },
+        run: {
+          id: "cli-loop-smoke"
+        },
+        step: {
+          id: "loop-dry-run",
+          attempt: 1
+        },
+        idempotencyKey: "cli-loop-smoke-0001",
+        policyDecision: { decision: "allow" },
+        source: createSmokeRunRequest().source,
+        requestedBy: createSmokeRunRequest().requestedBy,
+        workItem: createSmokeRunRequest().workItem
+      });
+
+      expect(submitted).toMatchObject({
+        ok: true,
+        value: {
+          requestId: "req_cli_loop_smoke_loop_dry_run_1"
+        }
+      });
+
+      const result = await connector.status({ requestId: "req_cli_loop_smoke_loop_dry_run_1" });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: {
+          requestId: "req_cli_loop_smoke_loop_dry_run_1",
+          status: status === "succeeded" ? "succeeded" : status,
+          result: {
+            status,
+            summary
+          }
+        }
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "unknown top-level field",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        providerRan: false
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate has unsupported field providerRan"
+    },
+    {
+      name: "mismatched requestId",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        requestId: "req_wrong_cli_loop_smoke"
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate requestId does not match the submitted request"
+    },
+    {
+      name: "mismatched correlationId",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        correlationId: "corr_wrong_cli_loop_smoke"
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate correlationId does not match nested payloads"
+    },
+    {
+      name: "unexpected repository mutation flag",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        mutatesRepository: true
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate mutatesRepository must be false"
+    },
+    {
+      name: "unexpected provider invocation flag",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        invokesProvider: true
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate invokesProvider must be false"
+    },
+    {
+      name: "unexpected agent-provider session flag",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        startsAgentProviderSession: true
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate startsAgentProviderSession must be false"
+    },
+    {
+      name: "unexpected production evidence archive flag",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        writesProductionEvidenceArchive: true
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate writesProductionEvidenceArchive must be false"
+    },
+    {
+      name: "traversing local artifact path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "aggregate-json",
+            path: "../state/x-gate3/aggregate.json"
+          }
+        ]
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+    },
+    {
+      name: "absolute local artifact path",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "aggregate-json",
+            path: "/tmp/x-gate3/aggregate.json"
+          }
+        ]
+      },
+      expectedMessage: "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].path is malformed"
+    },
+    {
+      name: "credential-shaped local artifact value",
+      aggregate: {
+        ...createXGate3Aggregate(),
+        localArtifacts: [
+          {
+            kind: "log",
+            path: "state/x-gate3/log.txt",
+            description: "token=sample-secret"
+          }
+        ]
+      },
+      expectedMessage:
+        "EIP XGate3LocalLaneSmokeAggregate localArtifacts[0].description must not contain credential-shaped values"
+    }
+  ])("rejects malformed X-Gate 3 local lane aggregate $name", async ({
+    aggregate,
+    expectedMessage
+  }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-invalid-"));
+    const cliPath = join(tempRoot, "loop-x-gate3-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      [
+        "#!/usr/bin/env node",
+        `process.stdout.write(${JSON.stringify(JSON.stringify(aggregate))});`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath, "x-gate3-smoke"]
+      });
+
+      await expect(transport.submitRunRequest(createSmokeRunRequest()))
+        .rejects.toMatchObject({
+          failureClass: "protocol-gap",
+          operation: "submit",
+          message: expectedMessage
+        });
+      expect(() =>
+        transport.getRunResult({ requestId: "req_cli_loop_smoke" })
+      ).toThrow(EnsenLoopCliTransportError);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "protocol gap for unsupported successful aggregate shape",
+      scriptBody:
+        "process.stdout.write(JSON.stringify({ schemaVersion: 'ensen-loop.x-gate3-local-lane-smoke.v2' }));",
+      expectedClass: "protocol-gap"
+    },
+    {
+      name: "loop gap for non-zero invalid aggregate shape",
+      scriptBody:
+        "process.stdout.write(JSON.stringify({ schemaVersion: 'ensen-loop.x-gate3-local-lane-smoke.v2' })); process.exitCode = 3;",
+      expectedClass: "loop-gap"
+    }
+  ])("classifies X-Gate 3 invalid aggregate output as $name", async ({
+    scriptBody,
+    expectedClass
+  }) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-xgate3-class-"));
+    const cliPath = join(tempRoot, "loop-x-gate3-cli.mjs");
+
+    await writeFile(
+      cliPath,
+      ["#!/usr/bin/env node", scriptBody, ""].join("\n"),
+      "utf8"
+    );
+    await chmod(cliPath, 0o755);
+
+    try {
+      const transport = createCliEnsenLoopEipExecutorTransport({
+        command: process.execPath,
+        args: [cliPath, "x-gate3-smoke"]
+      });
+
+      await expect(transport.submitRunRequest(createSmokeRunRequest()))
+        .rejects.toMatchObject({
+          failureClass: expectedClass,
+          operation: "submit"
+        });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("times out a CLI process that ignores SIGTERM", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-cli-loop-timeout-"));
     const cliPath = join(tempRoot, "loop-dry-run-cli.mjs");
@@ -664,4 +986,48 @@ const createSmokeAggregate = () => ({
     createdAt: "2026-04-30T04:00:03.000Z",
     contentType: "application/json"
   }
+});
+
+const createXGate3Aggregate = () => ({
+  schemaVersion: "ensen-loop.x-gate3-local-lane-smoke.v1",
+  boundary: "local-cli-bounded-fake-lane",
+  requestId: "req_cli_loop_smoke",
+  correlationId: "corr_cli_loop_smoke",
+  mutatesRepository: false,
+  invokesProvider: false,
+  startsAgentProviderSession: false,
+  writesProductionEvidenceArchive: false,
+  statusSnapshot: {
+    schemaVersion: "eip.run-status.v1",
+    id: "sts_cli_loop_xgate3",
+    requestId: "req_cli_loop_smoke",
+    correlationId: "corr_cli_loop_smoke",
+    status: "completed",
+    observedAt: "2026-05-01T04:00:02.000Z"
+  },
+  runResult: {
+    schemaVersion: "eip.run-result.v1",
+    id: "run_cli_loop_xgate3",
+    requestId: "req_cli_loop_smoke",
+    correlationId: "corr_cli_loop_smoke",
+    status: "succeeded",
+    completedAt: "2026-05-01T04:00:03.000Z",
+    verification: {
+      status: "passed",
+      summary: "Loop X-Gate 3 local fake lane succeeded."
+    }
+  },
+  localArtifacts: [
+    {
+      kind: "aggregate-json",
+      path: "state/x-gate3/aggregate.json",
+      contentType: "application/json",
+      description: "Local X-Gate 3 smoke aggregate"
+    },
+    {
+      kind: "log",
+      path: "state/x-gate3/loop.log",
+      contentType: "text/plain"
+    }
+  ]
 });

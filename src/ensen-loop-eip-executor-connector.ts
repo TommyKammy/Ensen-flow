@@ -151,7 +151,7 @@ interface JsonCliInvocationResult {
 export const createCliEnsenLoopEipExecutorTransport = (
   input: CreateCliEnsenLoopEipExecutorTransportInput
 ): EnsenLoopEipExecutorTransport => {
-  const smokeAggregates = new Map<string, EnsenLoopXGate2SmokeAggregateV1>();
+  const smokeAggregates = new Map<string, EnsenLoopSmokeAggregateV1>();
 
   return {
     async submitRunRequest(request: EipRunRequestV1) {
@@ -417,7 +417,7 @@ export const createEnsenLoopEipExecutorConnector = (
 const invokeEnsenLoopXGate2SmokeCli = async (
   input: CreateCliEnsenLoopEipExecutorTransportInput,
   request: EipRunRequestV1
-): Promise<EnsenLoopXGate2SmokeAggregateV1> => {
+): Promise<EnsenLoopSmokeAggregateV1> => {
   const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-x-gate2-smoke-"));
   const requestPath = join(tempRoot, "run-request.json");
 
@@ -441,31 +441,16 @@ const invokeEnsenLoopXGate2SmokeCli = async (
         : { exitCode: cliResult.exitCode }),
       ...(cliResult.stderr.length === 0 ? {} : { stderr: cliResult.stderr })
     };
-    const version = requireSchemaVersion(
-      aggregate,
-      "ensen-loop.x-gate2-smoke.v1",
-      "XGate2SmokeAggregate"
-    );
-
-    if (version !== undefined) {
-      throw new EnsenLoopCliTransportError({
-        message: version.message,
-        failureClass: invalidAggregateFailureClass,
-        operation: "submit",
-        ...invalidAggregateEvidence
-      });
-    }
-
     if (!isRecord(aggregate)) {
       throw new EnsenLoopCliTransportError({
-        message: "Ensen-loop X-Gate 2 smoke aggregate must be an object",
+        message: "Ensen-loop smoke aggregate must be an object",
         failureClass: invalidAggregateFailureClass,
         operation: "submit",
         ...invalidAggregateEvidence
       });
     }
 
-    const aggregateValidation = validateXGate2SmokeAggregate(aggregate, request.id);
+    const aggregateValidation = validateSmokeAggregate(aggregate, request.id);
 
     if (aggregateValidation !== undefined) {
       throw new EnsenLoopCliTransportError({
@@ -476,17 +461,17 @@ const invokeEnsenLoopXGate2SmokeCli = async (
       });
     }
 
-    return aggregate as unknown as EnsenLoopXGate2SmokeAggregateV1;
+    return aggregate as unknown as EnsenLoopSmokeAggregateV1;
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
 };
 
 const requireSmokeAggregate = (
-  smokeAggregates: Map<string, EnsenLoopXGate2SmokeAggregateV1>,
+  smokeAggregates: Map<string, EnsenLoopSmokeAggregateV1>,
   requestId: string,
   operation: EnsenLoopCliOperation
-): EnsenLoopXGate2SmokeAggregateV1 => {
+): EnsenLoopSmokeAggregateV1 => {
   const aggregate = smokeAggregates.get(requestId);
 
   if (aggregate === undefined) {
@@ -837,6 +822,25 @@ interface EnsenLoopXGate2SmokeAggregateV1 {
   evidenceBundleRef?: Record<string, unknown>;
 }
 
+interface EnsenLoopXGate3LocalLaneSmokeAggregateV1 {
+  schemaVersion: "ensen-loop.x-gate3-local-lane-smoke.v1";
+  boundary: "local-cli-bounded-fake-lane";
+  requestId: string;
+  correlationId: string;
+  mutatesRepository: false;
+  invokesProvider: false;
+  startsAgentProviderSession: false;
+  writesProductionEvidenceArchive: false;
+  statusSnapshot: EipRunStatusSnapshotV1;
+  runResult: EipRunResultV1;
+  localArtifacts: Array<Record<string, unknown>>;
+  evidenceBundleRef?: Record<string, unknown>;
+}
+
+type EnsenLoopSmokeAggregateV1 =
+  | EnsenLoopXGate2SmokeAggregateV1
+  | EnsenLoopXGate3LocalLaneSmokeAggregateV1;
+
 const createRunRequestPayload = (
   request: ExecutorSubmitRequest,
   createdAt: string
@@ -990,6 +994,23 @@ const validateRunStatusSnapshot = (
   return undefined;
 };
 
+const validateSmokeAggregate = (
+  value: Record<string, unknown>,
+  expectedRequestId: string
+): { message: string; reason: string } | undefined => {
+  if (value.schemaVersion === "ensen-loop.x-gate2-smoke.v1") {
+    return validateXGate2SmokeAggregate(value, expectedRequestId);
+  }
+
+  if (value.schemaVersion === "ensen-loop.x-gate3-local-lane-smoke.v1") {
+    return validateXGate3LocalLaneSmokeAggregate(value, expectedRequestId);
+  }
+
+  const versionText =
+    typeof value.schemaVersion === "string" ? value.schemaVersion : "missing";
+  return failClosedReason(`unsupported EIP XGateSmokeAggregate schemaVersion ${versionText}`);
+};
+
 const validateXGate2SmokeAggregate = (
   value: Record<string, unknown>,
   expectedRequestId: string
@@ -1088,6 +1109,205 @@ const validateXGate2SmokeAggregate = (
     const evidenceValidation = validateEvidenceBundleRef(value.evidenceBundleRef);
     if (evidenceValidation !== undefined) {
       return evidenceValidation;
+    }
+  }
+
+  return undefined;
+};
+
+const validateXGate3LocalLaneSmokeAggregate = (
+  value: Record<string, unknown>,
+  expectedRequestId: string
+): { message: string; reason: string } | undefined => {
+  const shapeName = "EIP XGate3LocalLaneSmokeAggregate";
+  const unknownProperty = findUnknownProperty(value, [
+    "schemaVersion",
+    "boundary",
+    "requestId",
+    "correlationId",
+    "mutatesRepository",
+    "invokesProvider",
+    "startsAgentProviderSession",
+    "writesProductionEvidenceArchive",
+    "statusSnapshot",
+    "runResult",
+    "localArtifacts",
+    "evidenceBundleRef"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`${shapeName} has unsupported field ${unknownProperty}`);
+  }
+
+  if (value.boundary !== "local-cli-bounded-fake-lane") {
+    return failClosedReason(`${shapeName} boundary is unsupported or malformed`);
+  }
+
+  for (const field of [
+    "mutatesRepository",
+    "invokesProvider",
+    "startsAgentProviderSession",
+    "writesProductionEvidenceArchive"
+  ]) {
+    if (value[field] !== false) {
+      return failClosedReason(`${shapeName} ${field} must be false`);
+    }
+  }
+
+  if (typeof value.requestId !== "string" || value.requestId !== expectedRequestId) {
+    return failClosedReason(`${shapeName} requestId does not match the submitted request`);
+  }
+
+  if (!isRecord(value.statusSnapshot)) {
+    return failClosedReason(`${shapeName} statusSnapshot must be an object`);
+  }
+
+  if (!isRecord(value.runResult)) {
+    return failClosedReason(`${shapeName} runResult must be an object`);
+  }
+
+  const statusVersion = requireSchemaVersion(
+    value.statusSnapshot,
+    "eip.run-status.v1",
+    "RunStatusSnapshot"
+  );
+  if (statusVersion !== undefined) {
+    return statusVersion;
+  }
+
+  const statusValidation = validateRunStatusSnapshot(value.statusSnapshot, expectedRequestId);
+  if (statusValidation !== undefined) {
+    return statusValidation;
+  }
+
+  const resultVersion = requireSchemaVersion(value.runResult, "eip.run-result.v1", "RunResult");
+  if (resultVersion !== undefined) {
+    return resultVersion;
+  }
+
+  const resultValidation = validateRunResult(value.runResult, expectedRequestId);
+  if (resultValidation !== undefined) {
+    return resultValidation;
+  }
+
+  if (
+    value.statusSnapshot.correlationId !== value.runResult.correlationId ||
+    value.correlationId !== value.statusSnapshot.correlationId
+  ) {
+    return failClosedReason(`${shapeName} correlationId does not match nested payloads`);
+  }
+
+  if (!Array.isArray(value.localArtifacts) || value.localArtifacts.length === 0) {
+    return failClosedReason(`${shapeName} localArtifacts must be a non-empty array`);
+  }
+
+  for (const [index, artifact] of value.localArtifacts.entries()) {
+    const artifactValidation = validateXGate3LocalArtifact(
+      artifact,
+      `${shapeName} localArtifacts[${index}]`
+    );
+    if (artifactValidation !== undefined) {
+      return artifactValidation;
+    }
+  }
+
+  if (value.evidenceBundleRef !== undefined) {
+    if (!isRecord(value.evidenceBundleRef)) {
+      return failClosedReason(`${shapeName} evidenceBundleRef must be an object`);
+    }
+
+    const evidenceVersion = requireSchemaVersion(
+      value.evidenceBundleRef,
+      "eip.evidence-bundle-ref.v1",
+      "EvidenceBundleRef"
+    );
+    if (evidenceVersion !== undefined) {
+      return evidenceVersion;
+    }
+
+    const evidenceValidation = validateEvidenceBundleRef(value.evidenceBundleRef);
+    if (evidenceValidation !== undefined) {
+      return evidenceValidation;
+    }
+  }
+
+  return undefined;
+};
+
+const validateXGate3LocalArtifact = (
+  value: unknown,
+  shapeName: string
+): { message: string; reason: string } | undefined => {
+  if (!isRecord(value)) {
+    return failClosedReason(`${shapeName} must be an object`);
+  }
+
+  const unknownProperty = findUnknownProperty(value, [
+    "kind",
+    "path",
+    "contentType",
+    "description",
+    "checksum"
+  ]);
+
+  if (unknownProperty !== undefined) {
+    return failClosedReason(`${shapeName} has unsupported field ${unknownProperty}`);
+  }
+
+  if (
+    typeof value.kind !== "string" ||
+    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value.kind)
+  ) {
+    return failClosedReason(`${shapeName}.kind is malformed`);
+  }
+
+  if (typeof value.path !== "string" || !isPortableLocalArtifactPath(value.path)) {
+    return failClosedReason(`${shapeName}.path is malformed`);
+  }
+
+  for (const field of ["kind", "path", "contentType", "description"]) {
+    const fieldValue = value[field];
+    if (typeof fieldValue === "string" && containsCredentialShapedValue(fieldValue)) {
+      return failClosedReason(`${shapeName}.${field} must not contain credential-shaped values`);
+    }
+  }
+
+  if (
+    value.contentType !== undefined &&
+    (typeof value.contentType !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[A-Za-z0-9_.-]+=[A-Za-z0-9_.+-]+)*$/.test(
+        value.contentType
+      ))
+  ) {
+    return failClosedReason(`${shapeName}.contentType is malformed`);
+  }
+
+  if (value.description !== undefined && !isNonEmptyString(value.description, 240)) {
+    return failClosedReason(`${shapeName}.description is malformed`);
+  }
+
+  if (value.checksum !== undefined) {
+    if (!isRecord(value.checksum)) {
+      return failClosedReason(`${shapeName}.checksum must be an object`);
+    }
+
+    const checksumUnknownProperty = findUnknownProperty(value.checksum, ["algorithm", "value"]);
+    if (checksumUnknownProperty !== undefined) {
+      return failClosedReason(
+        `${shapeName}.checksum has unsupported field ${checksumUnknownProperty}`
+      );
+    }
+
+    if (value.checksum.algorithm !== "sha256") {
+      return failClosedReason(`${shapeName}.checksum algorithm is unsupported`);
+    }
+
+    if (
+      typeof value.checksum.value !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.checksum.value) ||
+      containsCredentialShapedValue(value.checksum.value)
+    ) {
+      return failClosedReason(`${shapeName}.checksum value is malformed`);
     }
   }
 
@@ -1740,6 +1960,20 @@ const isLocalEvidencePath = (value: string): boolean =>
     value
   );
 
+const isPortableLocalArtifactPath = (value: string): boolean =>
+  value.length > 0 &&
+  value.length <= 1000 &&
+  /^(?![A-Za-z][A-Za-z0-9+.-]*:\/\/)(?!\/)(?![A-Za-z]:\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~@/-]+$/.test(
+    value
+  );
+
 const isFileEvidenceUri = (value: string): boolean =>
   /^file:\/\/\/(?!.*(?:^|\/)\.\.(?:\/|$))[^\s?#]+$/.test(value) &&
   !/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#\s]*[^/?#\s:@]+:[^/?#\s:@]+@/.test(value);
+
+const containsCredentialShapedValue = (value: string): boolean =>
+  /(?:^|\b)(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key)\s*[:=]/i.test(
+    value
+  ) ||
+  /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)-[A-Za-z0-9_-]{8,}\b/.test(value) ||
+  /-----BEGIN [A-Z ]*(?:PRIVATE KEY|TOKEN|SECRET)[A-Z ]*-----/.test(value);

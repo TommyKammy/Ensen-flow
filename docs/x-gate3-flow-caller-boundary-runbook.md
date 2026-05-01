@@ -50,7 +50,9 @@ rather than durable host paths in published notes:
 
 ```sh
 LOOP_ROOT=<codex-supervisor-root-or-loop-checkout>
-FLOW_SMOKE_ROOT=<temporary-flow-x-gate3-smoke-root>
+FLOW_SMOKE_ROOT=<absolute-temporary-flow-x-gate3-smoke-root>
+: "${LOOP_ROOT:?Set LOOP_ROOT to a local Ensen-loop checkout root}"
+: "${FLOW_SMOKE_ROOT:?Set FLOW_SMOKE_ROOT to a per-run temporary absolute root}"
 node "$LOOP_ROOT/dist/index.js" x-gate3-smoke <run-request-json-file> --workspace-root "$FLOW_SMOKE_ROOT/workspace" --state-root "$FLOW_SMOKE_ROOT/state"
 ```
 

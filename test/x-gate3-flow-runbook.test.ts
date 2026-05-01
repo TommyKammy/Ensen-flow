@@ -17,7 +17,13 @@ describe("X-Gate 3 Flow caller boundary runbook", () => {
       "x-gate3-smoke <run-request-json-file> --workspace-root <workspace-root> --state-root <state-root>",
     );
     expect(runbook).toContain("LOOP_ROOT=<codex-supervisor-root-or-loop-checkout>");
-    expect(runbook).toContain("FLOW_SMOKE_ROOT=<temporary-flow-x-gate3-smoke-root>");
+    expect(runbook).toContain("FLOW_SMOKE_ROOT=<absolute-temporary-flow-x-gate3-smoke-root>");
+    expect(runbook).toContain(
+      ': "${LOOP_ROOT:?Set LOOP_ROOT to a local Ensen-loop checkout root}"',
+    );
+    expect(runbook).toContain(
+      ': "${FLOW_SMOKE_ROOT:?Set FLOW_SMOKE_ROOT to a per-run temporary absolute root}"',
+    );
     expect(runbook).toContain("npm test -- test/x-gate3-flow-smoke.test.ts");
     expect(runbook).toContain("protocol-shaped input");
     expect(runbook).toContain("process stdout");

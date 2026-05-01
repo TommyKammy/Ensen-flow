@@ -16,6 +16,15 @@ describe("X-Gate 3 Flow caller boundary runbook", () => {
     expect(runbook).toContain(
       "x-gate3-smoke <run-request-json-file> --workspace-root <workspace-root> --state-root <state-root>",
     );
+    expect(runbook).toContain("LOOP_ROOT=<codex-supervisor-root-or-loop-checkout>");
+    expect(runbook).toContain("FLOW_SMOKE_ROOT=<absolute-temporary-flow-x-gate3-smoke-root>");
+    expect(runbook).toContain(
+      ': "${LOOP_ROOT:?Set LOOP_ROOT to a local Ensen-loop checkout root}"',
+    );
+    expect(runbook).toContain(
+      ': "${FLOW_SMOKE_ROOT:?Set FLOW_SMOKE_ROOT to a per-run temporary absolute root}"',
+    );
+    expect(runbook).toContain("npm test -- test/x-gate3-flow-smoke.test.ts");
     expect(runbook).toContain("protocol-shaped input");
     expect(runbook).toContain("process stdout");
     expect(runbook).toContain("aggregate schema version");
@@ -35,6 +44,8 @@ describe("X-Gate 3 Flow caller boundary runbook", () => {
     expect(runbook).toContain("no real pull request");
     expect(runbook).toContain("no ERPNext");
     expect(runbook).toContain("no Pharma/GxP");
+    expect(runbook).toContain("Cleanup is limited to the temporary smoke root");
+    expect(runbook).toContain("Do not delete repository checkouts, supervisor state");
     expect(runbook).not.toMatch(posixHomeRootPattern);
     expect(runbook).not.toMatch(linuxHomeRootPattern);
     expect(runbook).not.toMatch(windowsHomeRootPattern);

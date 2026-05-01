@@ -24,6 +24,9 @@ describe("HTTP notification connector skeleton", () => {
     notification: {
       endpointAlias: "local-operator-notification",
       method: "POST",
+      headers: {
+        "x-flow-fixture": "local-notification"
+      },
       payload: {
         subject: "placeholder-subject",
         outcome: "ready"
@@ -88,6 +91,9 @@ describe("HTTP notification connector skeleton", () => {
     expect(transport.deliveries).toHaveLength(1);
     expect(transport.deliveries[0]).toMatchObject({
       endpointAlias: "local-operator-notification",
+      headers: {
+        "x-flow-fixture": "local-notification"
+      },
       idempotencyKey: "notification-demo-run:notify-operator:attempt-1"
     });
   });

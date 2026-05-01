@@ -61,6 +61,7 @@ export interface HttpNotificationTransportDelivery {
   attempt: number;
   endpointAlias: string;
   method: HttpNotificationMethod;
+  headers?: Record<string, string>;
   payload?: Record<string, unknown>;
 }
 
@@ -176,6 +177,9 @@ export const createHttpNotificationConnector = (
         attempt,
         endpointAlias: request.notification.endpointAlias,
         method,
+        ...(request.notification.headers === undefined
+          ? {}
+          : { headers: request.notification.headers }),
         ...(request.notification.payload === undefined
           ? {}
           : { payload: request.notification.payload })

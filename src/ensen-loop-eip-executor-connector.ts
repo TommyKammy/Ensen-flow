@@ -1061,7 +1061,9 @@ const enrichSmokeRunResult = (aggregate: EnsenLoopSmokeAggregateV1): EipRunResul
     extensions: {
       ...(aggregate.runResult.extensions ?? {}),
       "x-ensen-flow-local-lane": {
-        localArtifacts: aggregate.localArtifacts,
+        localArtifacts: sanitizeXGate3LocalArtifacts(
+          aggregate.localArtifacts as unknown as Record<string, unknown>
+        ),
         localArtifactSemantics: "local-development-references-only",
         productionEvidence: false
       }
@@ -1378,11 +1380,12 @@ const validateXGate3LocalArtifacts = (
     return failClosedReason(`${shapeName}.stateFile is malformed`);
   }
 
-  if (!Array.isArray(value.evidenceMetadata) || value.evidenceMetadata.length === 0) {
-    return failClosedReason(`${shapeName}.evidenceMetadata must be a non-empty array`);
+  if (value.evidenceMetadata !== undefined && !Array.isArray(value.evidenceMetadata)) {
+    return failClosedReason(`${shapeName}.evidenceMetadata must be an array`);
   }
 
-  for (const [index, metadataPath] of value.evidenceMetadata.entries()) {
+  const evidenceMetadata = value.evidenceMetadata ?? [];
+  for (const [index, metadataPath] of evidenceMetadata.entries()) {
     if (
       typeof metadataPath !== "string" ||
       !isPortableLocalArtifactPath(metadataPath) ||
@@ -1400,7 +1403,7 @@ const sanitizeXGate3LocalArtifacts = (
 ): EnsenLoopXGate3LocalArtifactsV1 => ({
   laneRunId: value.laneRunId as string,
   stateFile: value.stateFile as string,
-  evidenceMetadata: [...(value.evidenceMetadata as string[])]
+  evidenceMetadata: [...((value.evidenceMetadata as string[] | undefined) ?? [])]
 });
 
 const validateRunRequest = (value: unknown): { message: string; reason: string } | undefined => {

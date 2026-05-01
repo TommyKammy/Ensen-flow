@@ -460,8 +460,21 @@ const resolveIdempotencyKey = (
       .replaceAll("{workflow.id}", workflow.id)
       .replaceAll("{step.id}", step?.id ?? "")
       .replaceAll("{trigger.type}", workflow.trigger.type)
+      .replaceAll("{trigger.scheduledFor}", resolveScheduledFor(triggerContext))
       .replaceAll("{trigger.idempotencyKey}", resolveTriggerKey(triggerContext))
   };
+};
+
+const resolveScheduledFor = (triggerContext: Record<string, unknown>): string => {
+  const schedule = triggerContext.schedule;
+  if (!isRecord(schedule)) {
+    return "";
+  }
+
+  const scheduledFor = schedule.scheduledFor;
+  return typeof scheduledFor === "string" || typeof scheduledFor === "number"
+    ? String(scheduledFor)
+    : "";
 };
 
 const resolveTriggerKey = (triggerContext: Record<string, unknown>): string => {

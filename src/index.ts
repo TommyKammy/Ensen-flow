@@ -140,6 +140,11 @@ export {
   runWorkflow
 } from "./workflow-runner.js";
 
+export {
+  evaluateScheduleTrigger,
+  isDueForSchedule
+} from "./schedule-trigger.js";
+
 export type {
   IdempotencyKeyDefinition,
   RetryBackoffPolicy,
@@ -159,6 +164,12 @@ export type {
   WorkflowStepHandlerInput,
   WorkflowStepHandlerResult
 } from "./workflow-runner.js";
+
+export type {
+  EvaluateScheduleTriggerInput,
+  ScheduleTriggerEvaluationResult,
+  ScheduleTriggerNotDueResult
+} from "./schedule-trigger.js";
 
 export type {
   CreateLocalAuditEventWriterInput,

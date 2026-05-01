@@ -97,6 +97,7 @@ describe("webhook intake boundary", () => {
       receivedAt: "2026-05-02T01:00:01.000Z",
       context: {
         webhook: {
+          inputFingerprint: expect.any(String),
           path: "/hooks/local-demo",
           receivedAt: "2026-05-02T01:00:00.000Z",
           headers: {
@@ -136,6 +137,76 @@ describe("webhook intake boundary", () => {
       id: `audit.${expectedRunId}.000001`,
       run: { id: expectedRunId }
     });
+  });
+
+  it("rejects reused requestIds when normalized webhook payload changes without writing audit events", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const firstInput = createWebhookInput();
+    const changedInput = createWebhookInput();
+    changedInput.payload = {
+      eventType: "local-demo.updated",
+      subject: "placeholder-subject"
+    };
+
+    const first = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input: firstInput
+    });
+    const auditBeforeReplay = await readAuditEvents(auditPath);
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input: changedInput
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    const persisted = await readWorkflowRunState(join(stateRoot, `${first.run.runId}.jsonl`));
+    expect(persisted).toEqual(first);
+    expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+  });
+
+  it("rejects reused requestIds when normalized webhook headers or receivedAt change", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const firstInput = createWebhookInput();
+    const changedHeaders = createWebhookInput();
+    changedHeaders.headers = {
+      "content-type": "application/json",
+      "x-event-type": "local-demo.updated"
+    };
+    const changedReceivedAt = createWebhookInput();
+    changedReceivedAt.receivedAt = "2026-05-02T01:00:01.000Z";
+
+    await consumeWebhookInput({
+      definition,
+      stateRoot,
+      input: firstInput
+    });
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        input: changedHeaders
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        input: changedReceivedAt
+      })
+    ).rejects.toThrow("webhook requestId reuse must keep normalized input unchanged");
   });
 
   it("keeps distinct requestIds with the same normalized slug in separate runs", async () => {

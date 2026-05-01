@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { WorkflowRunState } from "./workflow-run-state.js";
+import { readWorkflowRunState } from "./workflow-run-state.js";
 import { validateWorkflowDefinition } from "./workflow-definition.js";
 import type { WorkflowDefinition } from "./workflow-definition.js";
 import { runWorkflow } from "./workflow-runner.js";
@@ -84,15 +85,20 @@ export const consumeWebhookInput = async (
   const definition = assertWebhookWorkflow(options.definition);
   const normalizedInput = normalizeWebhookInput(options.input, definition.trigger.path);
   const runId = createWebhookRunId(definition.id, normalizedInput.requestId);
+  const statePath = join(options.stateRoot, `${runId}.jsonl`);
+  const inputFingerprint = createWebhookInputFingerprint(normalizedInput);
+
+  await assertExistingWebhookInputMatches(statePath, inputFingerprint);
 
   return runWorkflow({
     definition,
-    statePath: join(options.stateRoot, `${runId}.jsonl`),
+    statePath,
     auditPath: options.auditPath,
     runId,
     triggerContext: {
       requestId: normalizedInput.requestId,
       webhook: {
+        inputFingerprint,
         path: normalizedInput.path,
         receivedAt: normalizedInput.receivedAt,
         ...(normalizedInput.headers === undefined ? {} : { headers: normalizedInput.headers }),
@@ -297,6 +303,73 @@ const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string
   rejectCredentialShapedValue(value, path);
 };
 
+const assertExistingWebhookInputMatches = async (
+  statePath: string,
+  inputFingerprint: string
+): Promise<void> => {
+  const existingState = await readExistingWebhookRunState(statePath);
+  if (existingState === undefined) {
+    return;
+  }
+
+  const existingFingerprint = readStoredWebhookInputFingerprint(existingState);
+  if (existingFingerprint !== inputFingerprint) {
+    throw new WebhookIntakeRejectedError(
+      "webhook requestId reuse must keep normalized input unchanged"
+    );
+  }
+};
+
+const readExistingWebhookRunState = async (
+  statePath: string
+): Promise<WorkflowRunState | undefined> => {
+  try {
+    return await readWorkflowRunState(statePath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+
+    throw error;
+  }
+};
+
+const readStoredWebhookInputFingerprint = (state: WorkflowRunState): string | undefined => {
+  const triggerContext = state.run.trigger.context;
+  if (triggerContext === undefined) {
+    return undefined;
+  }
+
+  const webhook = triggerContext.webhook;
+  if (!isRecord(webhook)) {
+    return undefined;
+  }
+
+  return typeof webhook.inputFingerprint === "string" ? webhook.inputFingerprint : undefined;
+};
+
+const createWebhookInputFingerprint = (input: WebhookInput): string =>
+  createHash("sha256")
+    .update(stableStringify(input))
+    .digest("hex");
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  return `{${entries
+    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
+    .join(",")}}`;
+};
+
 const createWebhookRunId = (workflowId: string, requestId: string): string => {
   const slug =
     requestId
@@ -319,3 +392,6 @@ const isStrictUtcMillisTimestamp = (value: string): boolean => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;

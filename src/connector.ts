@@ -53,6 +53,7 @@ export interface ConnectorSubmitRequest {
   workflowId: string;
   runId: string;
   stepId: string;
+  idempotencyKey?: string;
   input?: Record<string, unknown>;
 }
 

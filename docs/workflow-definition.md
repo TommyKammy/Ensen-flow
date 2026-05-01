@@ -59,6 +59,13 @@ definition can name that a step requires an approval or notification action, but
 the schema does not bind that action to a provider, credential, channel, or
 runtime dispatch implementation.
 
+The HTTP notification connector skeleton keeps that boundary. A workflow may use
+`action.type: "notification"` with a placeholder `endpointAlias`, and focused
+tests may route that action through the local fake HTTP notification transport.
+The fixture must not include a real URL, customer endpoint, raw secret,
+authorization header, cookie, API key, OAuth token, or provider-specific
+credential. Real outbound HTTP integration is not enabled by this skeleton.
+
 ## Shape
 
 ```json

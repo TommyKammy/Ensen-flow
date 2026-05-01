@@ -7,6 +7,7 @@ Start here:
 - [Mission](./mission.md): the Ensen-flow short-form development charter.
 - [Workflow Definition Schema](./workflow-definition.md): the Phase 1 standalone workflow definition boundary and validation shape.
 - Webhook intake boundary: see the webhook section in [Workflow Definition Schema](./workflow-definition.md), the placeholder fixture in `fixtures/webhook-inputs/local-demo.valid.json`, and focused coverage via `npm test -- test/webhook-intake-boundary.test.ts`.
+- [HTTP Notification Connector Skeleton](./http-notification-connector.md): local fake notification connector behavior, unsupported capability behavior, safe fixture expectations, and non-goals for real outbound HTTP integration.
 - [X-Gate 2 Loop-Flow Smoke Runbook](./x-gate2-loop-flow-smoke-runbook.md): local smoke commands, artifacts, failure routing, and non-production boundaries.
 - [X-Gate 3 Flow Caller Boundary Runbook](./x-gate3-flow-caller-boundary-runbook.md): Flow-owned caller boundary for Loop local fake lane smoke input, stdout output, artifacts, and failure routing.
 - Focused Flow X-Gate 3 smoke coverage: `npm test -- test/x-gate3-flow-smoke.test.ts`.

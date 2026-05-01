@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "flow.workflow.v1",
+  "id": "local-http-notification-demo",
+  "trigger": {
+    "type": "manual",
+    "idempotencyKey": {
+      "source": "input",
+      "field": "requestId",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "notify-operator",
+      "action": {
+        "type": "notification",
+        "name": "http_notification",
+        "with": {
+          "endpointAlias": "local-operator-notification",
+          "method": "POST",
+          "payload": {
+            "subject": "placeholder-subject",
+            "outcome": "ready"
+          }
+        }
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "backoff": {
+          "strategy": "fixed",
+          "delayMs": 1000
+        }
+      },
+      "idempotencyKey": {
+        "source": "workflow",
+        "template": "{run.id}:{step.id}"
+      }
+    }
+  ]
+}

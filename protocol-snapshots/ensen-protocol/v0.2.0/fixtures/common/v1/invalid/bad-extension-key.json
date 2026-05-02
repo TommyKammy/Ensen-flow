@@ -1,0 +1,26 @@
+{
+  "artifactId": "artifact_commonEnvelope001",
+  "correlationId": "corr_commonTypes0001",
+  "createdAt": "2026-04-29T01:00:00Z",
+  "actor": {
+    "actorId": "actor_workflow001",
+    "actorType": "workflow"
+  },
+  "source": {
+    "sourceId": "source_fixture0001",
+    "sourceType": "fixture"
+  },
+  "workItem": {
+    "workItemId": "workitem_protocol0001"
+  },
+  "changeRequest": {
+    "changeRequestId": "cr_issue0003"
+  },
+  "evidenceBundle": {
+    "evidenceBundleId": "evb_common0001"
+  },
+  "classification": "public",
+  "extensions": {
+    "fixture-note": "missing required x- prefix"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "eip.run-result.v1",
+  "id": "run_01HV9ZX8J2K6T3QW4R5Y7M8N9S",
+  "requestId": "req_01HV7Y8M8F2KQ5W3P9R6T4N2BA",
+  "correlationId": "corr_01HV7Y8M8F2KQ5W3P9R6T4N2BB",
+  "status": "blocked",
+  "completedAt": "2026-04-29T02:40:00Z",
+  "verification": {
+    "status": "blocked",
+    "summary": "Required approval was not available."
+  },
+  "warnings": [
+    {
+      "code": "APPROVAL_REQUIRED",
+      "message": "The run stopped before making changes because approval was required."
+    }
+  ],
+  "metrics": {
+    "durationMs": 30000,
+    "attempts": 1
+  }
+}

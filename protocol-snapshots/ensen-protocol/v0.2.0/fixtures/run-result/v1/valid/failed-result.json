@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "eip.run-result.v1",
+  "id": "run_01HV9ZX8J2K6T3QW4R5Y7M8N9T",
+  "requestId": "req_01HV7Y8M8F2KQ5W3P9R6T4N2CA",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9U",
+  "status": "failed",
+  "completedAt": "2026-04-29T02:50:00Z",
+  "verification": {
+    "status": "failed",
+    "commands": [
+      {
+        "command": "npm test",
+        "status": "failed",
+        "completedAt": "2026-04-29T02:49:50Z",
+        "summary": "A schema validation test failed."
+      }
+    ],
+    "summary": "Run failed during verification."
+  },
+  "errors": [
+    {
+      "code": "VERIFICATION_FAILED",
+      "message": "Focused verification failed.",
+      "retryable": true
+    }
+  ],
+  "metrics": {
+    "durationMs": 120000,
+    "attempts": 2
+  }
+}

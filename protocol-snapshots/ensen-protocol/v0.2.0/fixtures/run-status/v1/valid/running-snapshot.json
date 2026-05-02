@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "eip.run-status.v1",
+  "id": "sts_01HV9ZX8J2K6T3QW4R5Y7M8N9T",
+  "requestId": "req_01HV9ZX8J2K6T3QW4R5Y7M8N9Q",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
+  "runId": "run_01HV9ZX8J2K6T3QW4R5Y7M8N9V",
+  "status": "running",
+  "observedAt": "2026-04-29T00:01:00Z",
+  "message": "Executor is running validation.",
+  "progress": {
+    "current": 2,
+    "total": 5,
+    "percent": 40,
+    "unit": "steps"
+  }
+}

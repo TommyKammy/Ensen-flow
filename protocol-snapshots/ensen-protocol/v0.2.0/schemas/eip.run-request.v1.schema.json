@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eip.ensen.dev/schemas/eip.run-request.v1.schema.json",
+  "title": "EIP-0001 RunRequest v1",
+  "description": "Transport-neutral request contract for asking an Ensen-compatible executor to run work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "correlationId",
+    "idempotencyKey",
+    "source",
+    "requestedBy",
+    "workItem",
+    "mode",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "eip.run-request.v1"
+    },
+    "id": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "correlationId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/CorrelationId"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{11,159}$"
+    },
+    "source": {
+      "$ref": "eip.common.v1.schema.json#/$defs/SourceRef"
+    },
+    "requestedBy": {
+      "$ref": "eip.common.v1.schema.json#/$defs/ActorRef"
+    },
+    "workItem": {
+      "$ref": "#/$defs/RunRequestWorkItem"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["plan", "apply", "validate"]
+    },
+    "createdAt": {
+      "$ref": "eip.common.v1.schema.json#/$defs/IsoDateTimeUtc"
+    },
+    "target": {
+      "$ref": "#/$defs/RunTarget"
+    },
+    "policyContext": {
+      "$ref": "#/$defs/PolicyContext"
+    },
+    "dataClassification": {
+      "$ref": "eip.common.v1.schema.json#/$defs/DataClassification"
+    },
+    "extensions": {
+      "$ref": "eip.common.v1.schema.json#/$defs/ExtensionMap"
+    }
+  },
+  "$defs": {
+    "RunRequestWorkItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItemId", "externalId"],
+      "properties": {
+        "workItemId": {
+          "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+        },
+        "externalId": {
+          "type": "string",
+          "description": "Identifier used by the external source system, such as a GitHub issue number or manual ticket id.",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://[^\\s]+$",
+          "maxLength": 400
+        }
+      }
+    },
+    "RunTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetType", "targetId"],
+      "properties": {
+        "targetType": {
+          "type": "string",
+          "enum": ["repository", "workspace", "environment", "manual"]
+        },
+        "targetId": {
+          "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+        },
+        "externalRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "PolicyContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policySetId": {
+          "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+        },
+        "riskClasses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true,
+          "maxItems": 20
+        },
+        "requiresApproval": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

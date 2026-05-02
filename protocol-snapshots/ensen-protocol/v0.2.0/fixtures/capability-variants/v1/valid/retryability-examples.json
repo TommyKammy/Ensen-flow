@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "eip.capability-variant.example.v1",
+  "variant": "retryability-examples",
+  "description": "retryable transport failure example and non-retryable transport failure example for synthetic Phase 3 capability checks.",
+  "protocolSnapshot": {
+    "tag": "v0.1.0",
+    "commit": "43fa3e7",
+    "issue": "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+  },
+  "runtimeBoundary": "none",
+  "boundaryRef": "<executor-boundary>",
+  "artifactRefs": [
+    "fixtures/run-request/v1/valid/github-issue-request.json",
+    "fixtures/run-status/v1/valid/accepted-snapshot.json",
+    "fixtures/run-result/v1/valid/blocked-result.json"
+  ],
+  "capabilitySummary": {
+    "submit": "required baseline",
+    "status": "partial",
+    "cancel": "unsupported",
+    "fetchEvidence": "unsupported",
+    "polling support": "partial",
+    "evidence reference support": "partial",
+    "idempotency expectation": "required baseline"
+  },
+  "cases": [
+    {
+      "name": "transient transport failure",
+      "operation": "status",
+      "retryability": "retryable",
+      "expectedMapping": "preserve the prior authoritative snapshot and retry only as consumer-local policy"
+    },
+    {
+      "name": "unsupported capability",
+      "operation": "cancel",
+      "retryability": "not retryable",
+      "expectedMapping": "route or block the unsupported operation without marking the run cancelled"
+    },
+    {
+      "name": "validation failure",
+      "operation": "submit",
+      "retryability": "not retryable",
+      "expectedMapping": "block until the artifact is corrected"
+    }
+  ],
+  "conformanceUse": "Loop and Flow consumers can use this example to separate retryable transport failures from non-retryable capability or validation failures."
+}

@@ -102,17 +102,24 @@ integration phase.
 
 ## Ensen-protocol Snapshot
 
-The copied Ensen-protocol v0.1.0 schema and conformance fixture snapshot is
+The active copied Ensen-protocol v0.2.0 schema, fixture, and contract-doc
+snapshot for pre-Phase 5 connector work is
 documented in
-`protocol-snapshots/ensen-protocol/v0.1.0/README.md`. It is repo-owned fixture
-data, not a runtime package dependency or a pointer to a sibling checkout.
+`protocol-snapshots/ensen-protocol/v0.2.0/README.md`. It is repo-owned fixture
+and contract data, not a runtime package dependency or a pointer to a sibling
+checkout.
 
 Ensen-flow currently exposes an EIP version boundary for later connector tests:
-protocol version `0.1.0`, release tag `v0.1.0`, and
+protocol version `0.2.0`, release tag `v0.2.0`, and
 `runtimeDependency: false`. Workflow definitions may declare
-`protocolVersion: "0.1.0"` as an optional boundary marker. Unsupported EIP major
-versions must fail closed until a future Ensen-flow connector boundary explicitly
-supports them.
+`protocolVersion: "0.2.0"` as an optional boundary marker. Unsupported EIP
+major versions must fail closed until a future Ensen-flow connector boundary
+explicitly supports them.
+
+The older v0.1.0 snapshot remains in this repository as historical fixture data
+for compatibility review only. New connector conformance and Phase 5 planning
+should use the v0.2.0 snapshot boundary unless a test explicitly documents a
+retained compatibility behavior.
 
 ## Local Sequential Runner
 

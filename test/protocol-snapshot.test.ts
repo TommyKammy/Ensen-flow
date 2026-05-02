@@ -12,10 +12,11 @@ const snapshotRoot = join(
   process.cwd(),
   "protocol-snapshots",
   "ensen-protocol",
-  "v0.1.0"
+  "v0.2.0"
 );
 
 const expectedSchemas = [
+  "schemas/eip.audit-event.v1.schema.json",
   "schemas/eip.evidence-bundle-ref.v1.schema.json",
   "schemas/eip.run-request.v1.schema.json",
   "schemas/eip.run-result.v1.schema.json",
@@ -25,11 +26,19 @@ const expectedSchemas = [
 const supportSchemas = ["schemas/eip.common.v1.schema.json"];
 
 const expectedFixtureFamilies = [
+  "audit-event",
+  "capability-variants",
+  "common",
   "evidence-bundle-ref",
   "run-request",
   "run-result",
   "run-status"
 ];
+
+const validOnlyFixtureFamilies = ["capability-variants"];
+const fixtureFamiliesWithInvalidFixtures = expectedFixtureFamilies.filter(
+  (fixtureFamily) => !validOnlyFixtureFamilies.includes(fixtureFamily)
+);
 
 const readJson = async (relativePath: string): Promise<unknown> =>
   JSON.parse(await readFile(join(snapshotRoot, relativePath), "utf8")) as unknown;
@@ -46,39 +55,48 @@ const listJsonFixtures = async (relativePath: string): Promise<string[]> => {
 };
 
 describe("Ensen-protocol snapshot boundary", () => {
-  it("vendors the Ensen-protocol v0.1.0 protocol snapshot with provenance", async () => {
+  it("vendors the Ensen-protocol v0.2.0 protocol snapshot with provenance", async () => {
     await expect(readJson("manifest.json")).resolves.toEqual({
       source: {
         repository: "TommyKammy/Ensen-protocol",
-        releaseTag: "v0.1.0",
-        protocolVersion: "0.1.0"
+        releaseTag: "v0.2.0",
+        protocolVersion: "0.2.0",
+        tagObjectSha: "8fc4fa5ea4a7dcf355363980650d46e62ddd0651",
+        targetCommit: "19c62f404101a1d0c00af8d011874c99f9c52189"
       },
       policy: {
         updatePolicy:
           "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
         runtimeDependency: false,
-        localCorrections: [
-          {
-            path: "fixtures/evidence-bundle-ref/v1/invalid/raw-secret-uri.json",
-            reason: "Use a scanner-safe invalid URI placeholder."
-          },
-          {
-            path: "fixtures/run-request/v1/invalid/raw-secret.json",
-            reason:
-              "Keep the invalid fixture deterministically invalid under ExtensionMap rules."
-          },
-          {
-            path: "schemas/eip.run-result.v1.schema.json",
-            reason:
-              "Require VerificationSummary.status for unambiguous verification payloads."
-          }
-        ]
+        localCorrections: [],
+        copiedArtifactsUnmodified: true
       },
       includes: {
         schemas: expectedSchemas,
         supportSchemas,
-        fixtureFamilies: expectedFixtureFamilies
-      }
+        fixtureFamilies: expectedFixtureFamilies,
+        contractDocs: expect.arrayContaining([
+          "docs/EIP-0001-run-request.md",
+          "docs/EIP-0005-run-status-snapshot.md",
+          "docs/integration/executor-transport-capabilities.md",
+          "docs/integration/transport-error-mapping-and-retryability.md"
+        ])
+      },
+      validationEvidence: {
+        recordedFromSourceRelease: true,
+        commands: [
+          "npm test",
+          "npm run check:fixtures",
+          "npm run check:public-fixtures",
+          "npm run check:schema-ids",
+          "npm run check:spec-boundary"
+        ]
+      },
+      intentionalExclusions: expect.arrayContaining([
+        expect.stringContaining("No Ensen-protocol package"),
+        expect.stringContaining("Flow-local workflow examples"),
+        expect.stringContaining("Copied capability variant fixtures")
+      ])
     });
 
     for (const schemaPath of [...expectedSchemas, ...supportSchemas]) {
@@ -86,8 +104,8 @@ describe("Ensen-protocol snapshot boundary", () => {
     }
   });
 
-  it("includes valid and invalid fixtures for each Phase 2 EIP surface", async () => {
-    for (const fixtureFamily of expectedFixtureFamilies) {
+  it("includes valid and invalid fixtures for each copied EIP surface that defines both", async () => {
+    for (const fixtureFamily of fixtureFamiliesWithInvalidFixtures) {
       const validFixturePath = join("fixtures", fixtureFamily, "v1", "valid");
       const invalidFixturePath = join("fixtures", fixtureFamily, "v1", "invalid");
       const validFixtures = await listJsonFixtures(validFixturePath);
@@ -104,6 +122,21 @@ describe("Ensen-protocol snapshot boundary", () => {
 
       for (const fixtureName of invalidFixtures) {
         await expect(readJson(join(invalidFixturePath, fixtureName))).resolves.toEqual(
+          expect.any(Object)
+        );
+      }
+    }
+  });
+
+  it("includes Phase 3 capability variant examples as valid conformance fixtures", async () => {
+    for (const fixtureFamily of validOnlyFixtureFamilies) {
+      const validFixturePath = join("fixtures", fixtureFamily, "v1", "valid");
+      const validFixtures = await listJsonFixtures(validFixturePath);
+
+      expect(validFixtures).not.toHaveLength(0);
+
+      for (const fixtureName of validFixtures) {
+        await expect(readJson(join(validFixturePath, fixtureName))).resolves.toEqual(
           expect.any(Object)
         );
       }
@@ -132,13 +165,13 @@ describe("Ensen-protocol snapshot boundary", () => {
 
     expect(eipVersionBoundary).toEqual({
       sourceRepository: "TommyKammy/Ensen-protocol",
-      snapshotReleaseTag: "v0.1.0",
-      supportedProtocolVersion: "0.1.0",
+      snapshotReleaseTag: "v0.2.0",
+      supportedProtocolVersion: "0.2.0",
       runtimeDependency: false,
       unsupportedMajorVersionPolicy:
         "fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version"
     });
-    expect(isSupportedEipProtocolVersion("0.1.0")).toBe(true);
+    expect(isSupportedEipProtocolVersion("0.2.0")).toBe(true);
     expect(isSupportedEipProtocolVersion("1.0.0")).toBe(false);
     expect(isSupportedEipProtocolVersion("bad-version")).toBe(false);
   });

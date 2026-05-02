@@ -42,7 +42,7 @@ describe("workflow definition schema", () => {
 
   it("accepts the supported optional EIP protocol version", () => {
     const workflow = readMutableWorkflowFixture();
-    workflow.protocolVersion = "0.1.0";
+    workflow.protocolVersion = "0.2.0";
 
     const result = validateWorkflowDefinition(workflow);
 

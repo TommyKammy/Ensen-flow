@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "eip.evidence-bundle-ref.v1",
+  "id": "evb_01HV9ZX8J2K6T3QW4R5Y7M8N9T",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
+  "type": "file_uri",
+  "uri": "file:///var/lib/ensen/evidence/run-01HV9ZX8J2K6T3QW4R5Y7M8N9Q/bundle.json",
+  "createdAt": "2026-04-29T00:05:00Z",
+  "contentType": "application/json"
+}

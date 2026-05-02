@@ -50,6 +50,9 @@ authority, and no premature compliance claims.
   boundary, Loop local fake lane command shape, stdout contract, failure
   routing, focused Flow smoke coverage, local cleanup limits, and
   non-production limits.
+- `docs/loop-flow-protocol-v0.2.0-connection-smoke.md`: pre-Phase 5
+  Protocol v0.2.0 Loop-Flow connection smoke, capability checks, focused
+  commands, and failure routing.
 
 ## Workflow Definition Schema
 

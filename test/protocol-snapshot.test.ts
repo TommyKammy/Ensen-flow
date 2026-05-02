@@ -68,8 +68,16 @@ describe("Ensen-protocol snapshot boundary", () => {
         updatePolicy:
           "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
         runtimeDependency: false,
-        localCorrections: [],
-        copiedArtifactsUnmodified: true
+        localCorrections: [
+          {
+            reason: expect.stringContaining("stale v0.1.0 references"),
+            paths: expect.arrayContaining([
+              "fixtures/README.md",
+              "fixtures/capability-variants/v1/valid/submit-only-no-polling.json"
+            ])
+          }
+        ],
+        copiedArtifactsUnmodified: false
       },
       includes: {
         schemas: expectedSchemas,
@@ -95,7 +103,7 @@ describe("Ensen-protocol snapshot boundary", () => {
       intentionalExclusions: expect.arrayContaining([
         expect.stringContaining("No Ensen-protocol package"),
         expect.stringContaining("Flow-local workflow examples"),
-        expect.stringContaining("Copied capability variant fixtures")
+        expect.stringContaining("stale upstream v0.1.0 provenance")
       ])
     });
 
@@ -140,6 +148,23 @@ describe("Ensen-protocol snapshot boundary", () => {
           expect.any(Object)
         );
       }
+    }
+  });
+
+  it("keeps Phase 3 capability variant provenance aligned to the v0.2.0 snapshot", async () => {
+    const validFixturePath = join("fixtures", "capability-variants", "v1", "valid");
+    const validFixtures = await listJsonFixtures(validFixturePath);
+
+    for (const fixtureName of validFixtures) {
+      const fixture = (await readJson(join(validFixturePath, fixtureName))) as {
+        protocolSnapshot?: unknown;
+      };
+
+      expect(fixture.protocolSnapshot).toEqual({
+        tag: "v0.2.0",
+        commit: "19c62f4",
+        issue: "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+      });
     }
   });
 

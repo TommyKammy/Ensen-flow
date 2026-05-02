@@ -33,8 +33,8 @@ smoke path across Ensen-flow and Ensen-loop:
 RunRequest -> RunStatusSnapshot -> RunResult -> EvidenceBundleRef
 ```
 
-The expected consumer snapshot is the `v0.1.0` release snapshot: tag `v0.1.0`
-at commit `43fa3e7`. Flow and Loop must vendor or copy that immutable release
+The expected consumer snapshot is the `v0.2.0` release snapshot: tag `v0.2.0`
+at commit `19c62f4`. Flow and Loop must vendor or copy that immutable release
 snapshot of the protocol artifacts into their own consumer test trees.
 Ensen-protocol provides no runtime package, server, SDK, connector, or shared
 implementation for this smoke path.

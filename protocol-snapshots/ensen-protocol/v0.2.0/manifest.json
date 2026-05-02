@@ -9,8 +9,20 @@
   "policy": {
     "updatePolicy": "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
     "runtimeDependency": false,
-    "localCorrections": [],
-    "copiedArtifactsUnmodified": true
+    "localCorrections": [
+      {
+        "reason": "Align Flow's consumer-facing copied snapshot provenance with the active v0.2.0 boundary after review identified stale v0.1.0 references in the upstream v0.2.0 fixture text.",
+        "paths": [
+          "fixtures/README.md",
+          "fixtures/capability-variants/v1/valid/evidence-unavailable.json",
+          "fixtures/capability-variants/v1/valid/fully-supported-transport.json",
+          "fixtures/capability-variants/v1/valid/retryability-examples.json",
+          "fixtures/capability-variants/v1/valid/submit-only-no-polling.json",
+          "fixtures/capability-variants/v1/valid/unsupported-cancel.json"
+        ]
+      }
+    ],
+    "copiedArtifactsUnmodified": false
   },
   "includes": {
     "schemas": [
@@ -61,6 +73,6 @@
   "intentionalExclusions": [
     "No Ensen-protocol package, SDK, generated client, server, OpenAPI client, scripts, node_modules, tests, or runtime implementation code is vendored into Ensen-flow.",
     "Flow-local workflow examples remain outside protocol-snapshots and are not treated as protocol conformance fixtures.",
-    "Copied capability variant fixtures are preserved exactly from the v0.2.0 tag, including upstream fixture fields that reference compatibility with older protocol snapshot tags."
+    "Flow corrects stale upstream v0.1.0 provenance text in the copied v0.2.0 capability variant fixtures and fixture README; no schema, runtime, or behavior contract is redefined."
   ]
 }

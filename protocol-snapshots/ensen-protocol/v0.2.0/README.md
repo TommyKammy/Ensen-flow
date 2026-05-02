@@ -49,7 +49,8 @@ Ensen-protocol release and update `manifest.json` in the same change. Do not
 point tests or runtime code at a sibling checkout as a mutable shared
 dependency.
 
-Copied protocol artifacts are preserved unmodified. If an upstream fixture
-contains compatibility text or metadata for an older snapshot, keep that as
-upstream contract content and document Flow's active snapshot boundary outside
-the copied artifact.
+Copied protocol artifacts should normally remain unchanged from the tagged
+release. If Flow must correct consumer-facing snapshot provenance without
+redefining schema, runtime, or behavior contracts, record the correction in
+`manifest.json` through `policy.localCorrections` and set
+`policy.copiedArtifactsUnmodified` accordingly.

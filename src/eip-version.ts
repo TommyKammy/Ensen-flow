@@ -1,15 +1,15 @@
 export interface EipVersionBoundary {
   sourceRepository: "TommyKammy/Ensen-protocol";
-  snapshotReleaseTag: "v0.1.0";
-  supportedProtocolVersion: "0.1.0";
+  snapshotReleaseTag: "v0.2.0";
+  supportedProtocolVersion: "0.2.0";
   runtimeDependency: false;
   unsupportedMajorVersionPolicy: "fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version";
 }
 
 export const eipVersionBoundary: EipVersionBoundary = {
   sourceRepository: "TommyKammy/Ensen-protocol",
-  snapshotReleaseTag: "v0.1.0",
-  supportedProtocolVersion: "0.1.0",
+  snapshotReleaseTag: "v0.2.0",
+  supportedProtocolVersion: "0.2.0",
   runtimeDependency: false,
   unsupportedMajorVersionPolicy:
     "fail-closed until an explicit Ensen-flow connector boundary supports the new EIP major version"

@@ -79,7 +79,7 @@ production artifact storage.
 
 ```json
 {
-  "protocolVersion": "0.1.0",
+  "protocolVersion": "0.2.0",
   "schemaVersion": "flow.workflow.v1",
   "id": "local-manual-demo",
   "name": "Local manual demo",

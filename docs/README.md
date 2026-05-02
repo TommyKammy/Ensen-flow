@@ -13,6 +13,6 @@ Start here:
 - [X-Gate 2 Loop-Flow Smoke Runbook](./x-gate2-loop-flow-smoke-runbook.md): local smoke commands, artifacts, failure routing, and non-production boundaries.
 - [X-Gate 3 Flow Caller Boundary Runbook](./x-gate3-flow-caller-boundary-runbook.md): Flow-owned caller boundary for Loop local fake lane smoke input, stdout output, artifacts, and failure routing.
 - Focused Flow X-Gate 3 smoke coverage: `npm test -- test/x-gate3-flow-smoke.test.ts`.
-- [Ensen-protocol v0.1.0 Snapshot](../protocol-snapshots/ensen-protocol/v0.1.0/README.md): copied protocol schemas and conformance fixtures for later connector tests.
+- [Ensen-protocol v0.2.0 Snapshot](../protocol-snapshots/ensen-protocol/v0.2.0/README.md): active copied protocol schemas, conformance fixtures, capability variant examples, and contract docs for pre-Phase 5 connector tests.
 
 Ensen-flow documentation should preserve the product boundary: lightweight explainable workflow orchestration, no shared runtime dependency with Ensen-loop, and no premature Pharma/GxP compliance claims.

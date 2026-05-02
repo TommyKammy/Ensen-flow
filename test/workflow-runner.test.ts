@@ -141,7 +141,7 @@ describe("sequential workflow runner", () => {
 
   it("runs a workflow that declares the supported EIP protocol version", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
-    definition.protocolVersion = "0.1.0";
+    definition.protocolVersion = "0.2.0";
     const statePath = await createTempStatePath();
 
     const result = await runWorkflow({

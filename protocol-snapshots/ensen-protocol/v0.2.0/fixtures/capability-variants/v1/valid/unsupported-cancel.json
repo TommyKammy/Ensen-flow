@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "eip.capability-variant.example.v1",
+  "variant": "unsupported-cancel",
+  "description": "unsupported capability variant example for a synthetic boundary that reports cancellation as unavailable.",
+  "protocolSnapshot": {
+    "tag": "v0.2.0",
+    "commit": "19c62f4",
+    "issue": "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+  },
+  "runtimeBoundary": "none",
+  "boundaryRef": "<executor-boundary>",
+  "artifactRefs": [
+    "fixtures/run-request/v1/valid/github-issue-request.json",
+    "fixtures/run-status/v1/valid/running-snapshot.json",
+    "fixtures/run-result/v1/valid/blocked-result.json"
+  ],
+  "capabilitySummary": {
+    "submit": "required baseline",
+    "status": "optional",
+    "cancel": "unsupported",
+    "fetchEvidence": "partial",
+    "polling support": "partial",
+    "evidence reference support": "partial",
+    "idempotency expectation": "required baseline"
+  },
+  "expectedConformance": [
+    "cancel requests outside the published support set leave the authoritative run unchanged",
+    "consumers report unsupported cancellation instead of marking the run cancelled by inference",
+    "status and terminal result remain anchored to the authoritative run record"
+  ],
+  "conformanceUse": "Loop and Flow consumers can use this example to check that unsupported cancel paths fail closed."
+}

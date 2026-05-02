@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eip.ensen.dev/schemas/eip.evidence-bundle-ref.v1.schema.json",
+  "title": "EIP-0004 EvidenceBundleRef v1",
+  "description": "Transport-neutral reference to durable evidence material. This artifact identifies where evidence can be found; it does not embed the evidence body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "correlationId",
+    "type",
+    "uri",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "eip.evidence-bundle-ref.v1"
+    },
+    "id": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "correlationId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/CorrelationId"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["local_path", "file_uri"]
+    },
+    "uri": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "not": {
+        "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://[^/?#\\s]*[^/?#\\s:@]+:[^/?#\\s:@]+@"
+      }
+    },
+    "createdAt": {
+      "$ref": "eip.common.v1.schema.json#/$defs/IsoDateTimeUtc"
+    },
+    "contentType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[A-Za-z0-9_.-]+=[A-Za-z0-9_.+-]+)*$"
+    },
+    "checksum": {
+      "$ref": "#/$defs/Checksum"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "local_path"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._~@/-]+$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "file_uri"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "pattern": "^file:///(?!.*(?:^|/)\\.\\.(?:/|$))[^\\s?#]+$"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["sha256"]
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "Metadata": {
+      "type": "object",
+      "description": "Small public descriptors about the referenced evidence. Do not put evidence bodies or credentials here.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "maxProperties": 20
+    }
+  }
+}

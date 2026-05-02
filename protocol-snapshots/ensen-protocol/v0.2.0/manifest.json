@@ -1,0 +1,78 @@
+{
+  "source": {
+    "repository": "TommyKammy/Ensen-protocol",
+    "releaseTag": "v0.2.0",
+    "protocolVersion": "0.2.0",
+    "tagObjectSha": "8fc4fa5ea4a7dcf355363980650d46e62ddd0651",
+    "targetCommit": "19c62f404101a1d0c00af8d011874c99f9c52189"
+  },
+  "policy": {
+    "updatePolicy": "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
+    "runtimeDependency": false,
+    "localCorrections": [
+      {
+        "reason": "Align Flow's consumer-facing copied snapshot provenance with the active v0.2.0 boundary after review identified stale v0.1.0 references in the upstream v0.2.0 fixture text.",
+        "paths": [
+          "fixtures/README.md",
+          "fixtures/capability-variants/v1/valid/evidence-unavailable.json",
+          "fixtures/capability-variants/v1/valid/fully-supported-transport.json",
+          "fixtures/capability-variants/v1/valid/retryability-examples.json",
+          "fixtures/capability-variants/v1/valid/submit-only-no-polling.json",
+          "fixtures/capability-variants/v1/valid/unsupported-cancel.json"
+        ]
+      }
+    ],
+    "copiedArtifactsUnmodified": false
+  },
+  "includes": {
+    "schemas": [
+      "schemas/eip.audit-event.v1.schema.json",
+      "schemas/eip.evidence-bundle-ref.v1.schema.json",
+      "schemas/eip.run-request.v1.schema.json",
+      "schemas/eip.run-result.v1.schema.json",
+      "schemas/eip.run-status.v1.schema.json"
+    ],
+    "supportSchemas": [
+      "schemas/eip.common.v1.schema.json"
+    ],
+    "fixtureFamilies": [
+      "audit-event",
+      "capability-variants",
+      "common",
+      "evidence-bundle-ref",
+      "run-request",
+      "run-result",
+      "run-status"
+    ],
+    "contractDocs": [
+      "docs/EIP-0000-common-types.md",
+      "docs/EIP-0001-run-request.md",
+      "docs/EIP-0002-run-result.md",
+      "docs/EIP-0003-audit-event.md",
+      "docs/EIP-0004-evidence-bundle-ref.md",
+      "docs/EIP-0005-run-status-snapshot.md",
+      "docs/compatibility.md",
+      "docs/conformance.md",
+      "docs/idempotency.md",
+      "docs/integration/consumer-conformance-handoff-checklist.md",
+      "docs/integration/executor-transport-capabilities.md",
+      "docs/integration/protocol-gap-and-conformance-drift.md",
+      "docs/integration/transport-error-mapping-and-retryability.md"
+    ]
+  },
+  "validationEvidence": {
+    "recordedFromSourceRelease": true,
+    "commands": [
+      "npm test",
+      "npm run check:fixtures",
+      "npm run check:public-fixtures",
+      "npm run check:schema-ids",
+      "npm run check:spec-boundary"
+    ]
+  },
+  "intentionalExclusions": [
+    "No Ensen-protocol package, SDK, generated client, server, OpenAPI client, scripts, node_modules, tests, or runtime implementation code is vendored into Ensen-flow.",
+    "Flow-local workflow examples remain outside protocol-snapshots and are not treated as protocol conformance fixtures.",
+    "Flow corrects stale upstream v0.1.0 provenance text in the copied v0.2.0 capability variant fixtures and fixture README; no schema, runtime, or behavior contract is redefined."
+  ]
+}

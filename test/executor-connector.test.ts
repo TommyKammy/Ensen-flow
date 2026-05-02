@@ -35,6 +35,17 @@ const readProtocolFixture = async (relativePath: string): Promise<unknown> =>
 const isFixtureRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const readCapabilitySummary = async (
+  relativePath: string
+): Promise<Record<string, unknown>> => {
+  const fixture = await readProtocolFixture(relativePath);
+  if (!isFixtureRecord(fixture) || !isFixtureRecord(fixture.capabilitySummary)) {
+    throw new Error(`${relativePath} must include capabilitySummary`);
+  }
+
+  return fixture.capabilitySummary;
+};
+
 const readFixtureRequestId = (value: unknown): string => {
   if (!isFixtureRecord(value) || typeof value.requestId !== "string") {
     throw new Error("fixture must include requestId");
@@ -340,6 +351,131 @@ describe("executor connector abstraction", () => {
       error: {
         code: "unsupported-operation",
         reason: "fake partial executor does not expose durable evidence"
+      }
+    });
+  });
+
+  it("keeps Protocol v0.2.0 capability variants explicit at the Flow connector boundary", async () => {
+    const submitOnlySummary = await readCapabilitySummary(
+      "fixtures/capability-variants/v1/valid/submit-only-no-polling.json"
+    );
+    const unsupportedCancelSummary = await readCapabilitySummary(
+      "fixtures/capability-variants/v1/valid/unsupported-cancel.json"
+    );
+    const evidenceUnavailableSummary = await readCapabilitySummary(
+      "fixtures/capability-variants/v1/valid/evidence-unavailable.json"
+    );
+
+    expect(submitOnlySummary).toMatchObject({
+      submit: "required baseline",
+      status: "unsupported",
+      cancel: "unsupported",
+      fetchEvidence: "unsupported",
+      "polling support": "unsupported",
+      "evidence reference support": "partial",
+      "idempotency expectation": "required baseline"
+    });
+    expect(unsupportedCancelSummary).toMatchObject({
+      cancel: "unsupported",
+      fetchEvidence: "partial",
+      "polling support": "partial"
+    });
+    expect(evidenceUnavailableSummary).toMatchObject({
+      fetchEvidence: "unsupported",
+      "evidence reference support": "partial"
+    });
+
+    const submitOnly = createFakeExecutorTransport({
+      connectorId: "protocol-v020-submit-only",
+      capabilities: createImmediateOnlyConnectorCapabilities({
+        unsupportedReason:
+          "protocol v0.2.0 submit-only-no-polling: status, cancel, and fetchEvidence are unsupported"
+      })
+    });
+    const submitted = await submitOnly.submit({
+      ...submitRequest,
+      policyDecision: { decision: "allow" }
+    });
+
+    expect(submitted).toMatchObject({
+      ok: true,
+      value: {
+        flowControl: { state: "ready" }
+      }
+    });
+    if (!submitted.ok) {
+      throw new Error("submit-only connector should accept the baseline RunRequest");
+    }
+
+    for (const operation of ["status", "cancel", "fetchEvidence"] as const) {
+      const result =
+        operation === "status"
+          ? await submitOnly.status({ requestId: submitted.value.requestId })
+          : operation === "cancel"
+            ? await submitOnly.cancel({ requestId: submitted.value.requestId })
+            : await submitOnly.fetchEvidence({ requestId: submitted.value.requestId });
+
+      expect(result).toMatchObject({
+        ok: false,
+        operation,
+        error: {
+          code: "unsupported-operation",
+          retryable: false,
+          reason:
+            "protocol v0.2.0 submit-only-no-polling: status, cancel, and fetchEvidence are unsupported"
+        }
+      });
+    }
+
+    const evidenceUnavailable = createFakeExecutorTransport({
+      connectorId: "protocol-v020-evidence-unavailable",
+      capabilities: {
+        fetchEvidence: {
+          supported: false,
+          reason:
+            "protocol v0.2.0 evidence-unavailable: fetchEvidence is unsupported and evidence reference support is partial"
+        }
+      },
+      statusScript: [
+        {
+          status: "succeeded",
+          result: {
+            status: "succeeded",
+            summary: "terminal result remains authoritative without evidence fetch success"
+          }
+        }
+      ]
+    });
+    const evidenceSubmitted = await evidenceUnavailable.submit({
+      ...submitRequest,
+      run: { id: "evidence-unavailable-run" },
+      policyDecision: { decision: "allow" }
+    });
+    if (!evidenceSubmitted.ok) {
+      throw new Error("evidence-unavailable submit should succeed");
+    }
+
+    expect(await evidenceUnavailable.status({ requestId: evidenceSubmitted.value.requestId }))
+      .toMatchObject({
+        ok: true,
+        value: {
+          status: "succeeded",
+          result: {
+            status: "succeeded",
+            summary: "terminal result remains authoritative without evidence fetch success"
+          }
+        }
+      });
+    expect(
+      await evidenceUnavailable.fetchEvidence({ requestId: evidenceSubmitted.value.requestId })
+    ).toMatchObject({
+      ok: false,
+      operation: "fetchEvidence",
+      error: {
+        code: "unsupported-operation",
+        retryable: false,
+        reason:
+          "protocol v0.2.0 evidence-unavailable: fetchEvidence is unsupported and evidence reference support is partial"
       }
     });
   });

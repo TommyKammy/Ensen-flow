@@ -43,12 +43,12 @@ repository root:
 ```sh
 npm ci
 npm run build
-npm test -- test/executor-connector.test.ts test/cli-loop-executor-smoke.test.ts test/protocol-snapshot.test.ts
+npm test -- test/executor-connector.test.ts test/cli-loop-executor-smoke.test.ts test/protocol-snapshot.test.ts test/loop-flow-protocol-v020-smoke-runbook.test.ts
 ```
 
 The focused command validates the Flow executor connector, the local/fake Loop
-CLI stdout smoke, and the copied Protocol v0.2.0 snapshot. The full repo check
-remains:
+CLI stdout smoke, the copied Protocol v0.2.0 snapshot, and the runbook guard.
+The full repo check remains:
 
 ```sh
 npm test

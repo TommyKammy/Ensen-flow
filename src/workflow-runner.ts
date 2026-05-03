@@ -13,6 +13,7 @@ import type {
 } from "./executor-connector.js";
 import type {
   WorkflowRunIdempotencyMetadata,
+  WorkflowRunRecoveryDecisionMetadata,
   WorkflowStepAttemptResultMetadata,
   WorkflowRunState,
   WorkflowStepAttemptState
@@ -222,7 +223,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         break;
       } catch (error) {
         const stepResult = errorStepResult(error);
-        const retryable = attempt < retryPolicy.maxAttempts;
+        const recovery = recoveryDecisionFromStepResult(stepResult, error);
+        const retryable = recovery === undefined && attempt < retryPolicy.maxAttempts;
         const failedAt = now();
         const nextAttemptAt = retryable
           ? calculateNextAttemptAt(failedAt, retryPolicy, attempt)
@@ -238,7 +240,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
             reason: errorReason(error)
           },
-          ...(stepResult === undefined ? {} : { result: stepResult })
+          ...(stepResult === undefined ? {} : { result: stepResult }),
+          ...(recovery === undefined ? {} : { recovery })
         });
         await writeStepAuditEvent(auditWriter, {
           type: "step.failed",
@@ -250,8 +253,18 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
             reason: errorReason(error)
           },
-          outcome: { status: "failed", reason: errorReason(error) }
+          outcome: {
+            status: auditOutcomeStatusFromRecovery(recovery),
+            reason: errorReason(error)
+          }
         });
+
+        if (
+          recovery?.state === "approval-required" ||
+          recovery?.state === "manual-repair-needed"
+        ) {
+          return readWorkflowRunState(input.statePath);
+        }
 
         if (!retryable) {
           const completedAt = now();
@@ -259,12 +272,16 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             type: "run.completed",
             runId,
             terminalState: "failed",
-            occurredAt: completedAt
+            occurredAt: completedAt,
+            ...(recovery === undefined ? {} : { recovery })
           });
           await auditWriter?.write({
             type: "workflow.failed",
             occurredAt: completedAt,
-            outcome: { status: "failed", reason: errorReason(error) }
+            outcome: {
+              status: auditOutcomeStatusFromRecovery(recovery),
+              reason: errorReason(error)
+            }
           });
           return readWorkflowRunState(input.statePath);
         }
@@ -338,6 +355,56 @@ const executorFailureReason = (executor: ExecutorConnectorStatusSnapshot): strin
   }
 
   return `executor status ${executor.status} did not complete successfully`;
+};
+
+const recoveryDecisionFromStepResult = (
+  stepResult: WorkflowStepAttemptResultMetadata | undefined,
+  error: unknown
+): WorkflowRunRecoveryDecisionMetadata | undefined => {
+  if (!isRecord(stepResult) || !isExecutorStatusSnapshot(stepResult.executor)) {
+    return undefined;
+  }
+
+  const reason = errorReason(error);
+  if (stepResult.executor.status === "approval-required") {
+    return {
+      state: "approval-required",
+      decision: "await-human-approval",
+      reason
+    };
+  }
+
+  if (stepResult.executor.status === "blocked") {
+    return {
+      state: "blocked",
+      decision: "block-run",
+      reason
+    };
+  }
+
+  if (stepResult.executor.status === "needs-review") {
+    return {
+      state: "manual-repair-needed",
+      decision: "manual-repair-needed",
+      reason
+    };
+  }
+
+  return undefined;
+};
+
+const auditOutcomeStatusFromRecovery = (
+  recovery: WorkflowRunRecoveryDecisionMetadata | undefined
+): "failed" | "approval-required" | "blocked" | "manual-repair-needed" => {
+  if (
+    recovery?.state === "approval-required" ||
+    recovery?.state === "blocked" ||
+    recovery?.state === "manual-repair-needed"
+  ) {
+    return recovery.state;
+  }
+
+  return "failed";
 };
 
 const isExecutorStatusSnapshot = (
@@ -474,6 +541,24 @@ const assertExistingRunRecoverable = (
     if (latestAttempt?.status === "running") {
       throw new Error(
         `existing workflow run state has active step attempt ${stepId}#${latestAttempt.attempt}; manual repair is required before recovery`
+      );
+    }
+
+    if (latestAttempt?.status === "approval-required") {
+      throw new Error(
+        `existing workflow run state has approval-required step ${stepId}#${latestAttempt.attempt}; human approval is required before recovery`
+      );
+    }
+
+    if (latestAttempt?.status === "blocked") {
+      throw new Error(
+        `existing workflow run state has blocked step ${stepId}#${latestAttempt.attempt}; operator review is required before recovery`
+      );
+    }
+
+    if (latestAttempt?.status === "manual-repair-needed") {
+      throw new Error(
+        `existing workflow run state has manual-repair-needed step ${stepId}#${latestAttempt.attempt}; manual repair is required before recovery`
       );
     }
 
@@ -622,7 +707,12 @@ interface StepAuditInput {
     nextAttemptAt?: string;
   };
   outcome?: {
-    status: "succeeded" | "failed";
+    status:
+      | "succeeded"
+      | "failed"
+      | "approval-required"
+      | "blocked"
+      | "manual-repair-needed";
     reason?: string;
   };
 }

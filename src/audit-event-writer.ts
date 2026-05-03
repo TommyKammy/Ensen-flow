@@ -43,7 +43,13 @@ export interface NeutralAuditRetryContext {
 }
 
 export interface NeutralAuditOutcomeContext {
-  status: WorkflowRunTerminalState | "succeeded" | "failed";
+  status:
+    | WorkflowRunTerminalState
+    | "succeeded"
+    | "failed"
+    | "approval-required"
+    | "blocked"
+    | "manual-repair-needed";
   reason?: string;
 }
 
@@ -93,7 +99,10 @@ const NEUTRAL_AUDIT_OUTCOME_STATUSES = new Set<string>([
   "succeeded",
   "failed",
   "canceled",
-  "retryable-failed"
+  "retryable-failed",
+  "approval-required",
+  "blocked",
+  "manual-repair-needed"
 ]);
 const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
@@ -192,7 +201,7 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
 
   if (event.outcome !== undefined && !NEUTRAL_AUDIT_OUTCOME_STATUSES.has(event.outcome.status)) {
     throw new Error(
-      "audit event outcome.status must be succeeded, failed, canceled, or retryable-failed"
+      "audit event outcome.status must be succeeded, failed, canceled, retryable-failed, approval-required, blocked, or manual-repair-needed"
     );
   }
 

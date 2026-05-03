@@ -186,6 +186,75 @@ describe("workflow run JSONL state", () => {
     );
   });
 
+  it("returns an already-terminal blocked recovery report without appending completion", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-stop-blocked-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-stop-blocked-001",
+      stepId: "approval-gate",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.failed",
+      runId: "run-stop-blocked-001",
+      stepId: "approval-gate",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      retry: {
+        retryable: false,
+        reason: "Required approval prerequisite is blocked."
+      },
+      recovery: {
+        state: "blocked",
+        decision: "block-run",
+        reason: "Required approval prerequisite is blocked."
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "run-stop-blocked-001",
+      terminalState: "failed",
+      occurredAt: "2026-04-29T00:00:04.000Z",
+      recovery: {
+        state: "blocked",
+        decision: "block-run",
+        reason: "Required approval prerequisite is blocked."
+      }
+    });
+    const contentsBeforeStop = await readFile(statePath, "utf8");
+
+    const report = await stopWorkflowRunRecovery({
+      statePath,
+      runId: "run-stop-blocked-001",
+      stoppedAt: "2026-04-29T00:00:05.000Z"
+    });
+
+    expect(report).toMatchObject({
+      classification: "blocked",
+      action: "operator-review-required",
+      historyPreserved: true,
+      run: {
+        runId: "run-stop-blocked-001",
+        status: "failed",
+        terminalState: "failed"
+      },
+      eventCount: 4
+    });
+    await expect(readFile(statePath, "utf8")).resolves.toBe(contentsBeforeStop);
+  });
+
   it("classifies failed non-terminal step attempts as manual-repair-needed", async () => {
     const statePath = await createTempStatePath();
 

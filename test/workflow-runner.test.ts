@@ -713,7 +713,7 @@ describe("sequential workflow runner", () => {
       executorStatus: "blocked",
       resultStatus: "blocked",
       expectedRunStatus: "failed",
-      expectedAttemptStatus: "failed",
+      expectedAttemptStatus: "blocked",
       summary: "Loop X-Gate 3 local fake lane blocked."
     }
   ] as const)(

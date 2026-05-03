@@ -578,6 +578,119 @@ describe("HTTP notification connector skeleton", () => {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("records terminal notification failure without replaying side effects", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "ensen-flow-http-notification-terminal-"));
+    const statePath = join(tempRoot, "runs", "http-notification.jsonl");
+    const auditPath = join(tempRoot, "audit", "http-notification.jsonl");
+    const transport = createFakeHttpNotificationTransport({
+      outcomes: [
+        {
+          status: "failed",
+          summary: "local fake endpoint rejected notification permanently",
+          retryable: false
+        },
+        {
+          status: "succeeded",
+          summary: "unexpected replay should not be consumed"
+        }
+      ]
+    });
+    const connector = createHttpNotificationConnector({ transport });
+
+    try {
+      const result = await runWorkflow({
+        definition: {
+          ...notificationWorkflow,
+          steps: [
+            {
+              ...notificationWorkflow.steps[0],
+              retry: {
+                maxAttempts: 1,
+                backoff: {
+                  strategy: "none"
+                }
+              }
+            }
+          ]
+        },
+        statePath,
+        auditPath,
+        runId: "notification-terminal-run",
+        now: createClock([
+          "2026-05-03T01:10:00.000Z",
+          "2026-05-03T01:10:00.000Z",
+          "2026-05-03T01:10:01.000Z",
+          "2026-05-03T01:10:02.000Z",
+          "2026-05-03T01:10:03.000Z"
+        ]),
+        stepHandler: async ({ attempt, runState, step }) => {
+          const submitted = await connector.submit({
+            workflowId: runState.run.workflowId,
+            runId: runState.run.runId,
+            stepId: step.id,
+            idempotencyKey: `${runState.run.runId}:${step.id}`,
+            attempt,
+            notification: {
+              endpointAlias: "local-operator-notification",
+              method: "POST",
+              payload: {
+                subject: "placeholder-subject"
+              }
+            }
+          });
+
+          if (!submitted.ok) {
+            throw new Error(submitted.error.message);
+          }
+
+          return {
+            executor: {
+              requestId: submitted.value.requestId,
+              status: "succeeded",
+              observedAt: submitted.value.acceptedAt,
+              result: {
+                status: "succeeded",
+                summary: submitted.value.notification.summary,
+                evidence: submitted.value.evidence
+              }
+            }
+          };
+        }
+      });
+
+      expect(result.run.terminalState).toBe("failed");
+      expect(result.stepAttempts["notify-operator"]).toMatchObject([
+        {
+          attempt: 1,
+          status: "failed",
+          retry: {
+            retryable: false,
+            reason: "local fake endpoint rejected notification permanently"
+          }
+        }
+      ]);
+      expect(transport.deliveries).toHaveLength(1);
+
+      const replay = await runWorkflow({
+        definition: notificationWorkflow,
+        statePath,
+        auditPath,
+        runId: "notification-terminal-run",
+        triggerContext: {
+          requestId: "notification-terminal-replay"
+        }
+      });
+
+      expect(replay).toEqual(result);
+      expect(transport.deliveries).toHaveLength(1);
+      await expect(readFile(auditPath, "utf8")).resolves.not.toContain(
+        "unexpected replay should not be consumed"
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 const notificationWorkflow: WorkflowDefinition = {

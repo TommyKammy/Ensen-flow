@@ -407,7 +407,10 @@ const normalizeEvidenceRef = (
   }
 
   const checksum = normalizeChecksum(value.checksum);
-  const dataClassification = normalizeDataClassification(value.dataClassification);
+  const dataClassification = normalizeDataClassification(
+    value.dataClassification,
+    typeof value.id === "string" ? value.id : "<unknown-evidence-ref>"
+  );
   return {
     schemaVersion: EVIDENCE_REF_SCHEMA_VERSION,
     id: value.id,
@@ -426,7 +429,14 @@ const normalizeEvidenceRef = (
   };
 };
 
-const normalizeDataClassification = (value: unknown): EvidenceDataClassification => {
+const normalizeDataClassification = (
+  value: unknown,
+  evidenceRefId: string
+): EvidenceDataClassification => {
+  if (value === undefined || value === "public") {
+    return "public";
+  }
+
   if (
     value === "internal" ||
     value === "confidential" ||
@@ -435,7 +445,21 @@ const normalizeDataClassification = (value: unknown): EvidenceDataClassification
     return value;
   }
 
-  return "public";
+  throw new Error(
+    `evidence ref ${safeErrorMessage(evidenceRefId)} has unsupported dataClassification ${formatUnknownEnumValue(value)}`
+  );
+};
+
+const formatUnknownEnumValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    return JSON.stringify(safeErrorMessage(value).slice(0, 64));
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  return typeof value;
 };
 
 const normalizeChecksum = (

@@ -438,6 +438,33 @@ describe("workflow run JSONL state", () => {
       context: { evidencePath: ["", "home", "operator", "flow", "state.jsonl"].join("/") },
       message:
         "trigger.context.evidencePath must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    },
+    {
+      context: { evidencePath: ["", "tmp", "flow", "state.jsonl"].join("/") },
+      message:
+        "trigger.context.evidencePath must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    },
+    {
+      context: { evidencePath: ["", "var", "log", "flow.log"].join("/") },
+      message:
+        "trigger.context.evidencePath must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    },
+    {
+      context: { evidenceUri: ["file:", "", "", "Users", "operator", "flow", "state.jsonl"].join("/") },
+      message:
+        "trigger.context.evidenceUri must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    },
+    {
+      context: { evidenceUri: ["file:", "", "", "home", "operator", "flow", "state.jsonl"].join("/") },
+      message:
+        "trigger.context.evidenceUri must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    },
+    {
+      context: {
+        evidenceUri: ["file:", "", "", "C:", "Users", "operator", "flow", "state.jsonl"].join("/")
+      },
+      message:
+        "trigger.context.evidenceUri must not contain unsafe workflow artifact values (category: workstation-local-path)"
     }
   ])(
     "rejects unsafe trigger context artifact values before writing %#",

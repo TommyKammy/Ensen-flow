@@ -19,7 +19,7 @@ const TOKEN_ASSIGNMENT_PATTERN = /(?:^|\b)token\s*[:=]/iu;
 const SESSION_COOKIE_PATTERN =
   /(?:^|\b)(?:cookie|set-cookie)\s*:\s*[^;\n]*(?:session|sid)=|(?:^|\b)(?:sessionid|session_id|sid)\s*=/iu;
 const WORKSTATION_LOCAL_PATH_PATTERN =
-  /(?:^|["'\s])(?:\/Users\/[^/\\\s]+|\/home\/[^/\\\s]+|[A-Za-z]:[\\/][^/\\\s]+|file:\/\/\/[A-Za-z]:\/[^/\\\s]+)/u;
+  /(?:^|["'\s])(?:\/(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/[^/\\\s]+|[A-Za-z]:[\\/][^/\\\s]+|file:\/\/\/(?:[A-Za-z]:\/|(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/)[^/\\\s]+)/u;
 
 export const findUnsafeWorkflowArtifactValue = (
   value: unknown,

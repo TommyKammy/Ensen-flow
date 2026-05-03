@@ -116,6 +116,7 @@ describe("HTTP notification connector skeleton", () => {
     const delivery = createDeferred<HttpNotificationOutcome>();
     const connector = createHttpNotificationConnector({
       transport: {
+        inputBoundary: { mode: "dry-run" },
         deliver(request) {
           deliveries.push(request);
           return delivery.promise;
@@ -148,6 +149,7 @@ describe("HTTP notification connector skeleton", () => {
 
     connector = createHttpNotificationConnector({
       transport: {
+        inputBoundary: { mode: "dry-run" },
         deliver(request) {
           deliveries.push(request);
           reentrant = connector.submit(notifyRequest);
@@ -175,6 +177,7 @@ describe("HTTP notification connector skeleton", () => {
     const delivery = createDeferred<HttpNotificationOutcome>();
     const connector = createHttpNotificationConnector({
       transport: {
+        inputBoundary: { mode: "dry-run" },
         deliver(request) {
           deliveries.push(request);
           return delivery.promise;
@@ -380,6 +383,31 @@ describe("HTTP notification connector skeleton", () => {
         code: "unsupported-operation",
         retryable: false,
         reason: "real outbound HTTP is not enabled"
+      }
+    });
+  });
+
+  it("fails closed when a custom transport has no dry-run-first input boundary", async () => {
+    const connector = createHttpNotificationConnector({
+      transport: {
+        deliver() {
+          return {
+            status: "succeeded",
+            summary: "custom transport accepted notification"
+          };
+        }
+      }
+    });
+
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: false,
+      connectorId: "http-notification",
+      operation: "submit",
+      error: {
+        code: "unsupported-operation",
+        retryable: false,
+        reason:
+          "HTTP notification transport must declare a fake, local, or dry-run input boundary before controlled pilot use"
       }
     });
   });

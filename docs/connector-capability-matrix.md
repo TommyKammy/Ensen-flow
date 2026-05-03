@@ -29,6 +29,28 @@ production integration readiness.
 | local file connector | fake/local-only: `flow.local-file.v1` reads and writes UTF-8 fixture files under explicit allowed root aliases. | Supported for retryable local read failures such as missing fixture targets when the workflow retry policy allows another attempt. | Supported for successful `submit` calls through the connector idempotency store; changed replay fingerprints fail closed. | Unsupported; file access is bounded by allowed roots and does not request approvals. | Unsupported and returns `unsupported-operation`; actions complete inline. | Unsupported and returns `unsupported-operation`. | Unsupported and returns `unsupported-operation`; submit receipts include sanitized alias plus relative-path evidence only. | Deferred: unrestricted filesystem automation, binary blob processing, lane-state file access, repository mutation, production artifact storage, and customer data handling. |
 | executor connector | supported interface boundary for Ensen-protocol v0.2.0: `ExecutorConnector` defines the protocol-facing `submit`, `status`, `cancel`, and `fetchEvidence` operations for future executor implementations, including explicit flow-control states. | Partial support: Flow runner retry handling can react to retryable connector failures, and Protocol v0.2.0 transport error examples define retryable and non-retryable outcomes; provider-specific retry queues remain deferred. | Required baseline for retryable `submit`: Flow carries `idempotencyKey` through `ExecutorSubmitRequest`; each implementation must enforce the protocol idempotency expectation by binding replay to the authoritative scope record and failing closed when idempotency, requester, or provenance is missing or malformed. | Supported as a flow-control state: `approval-required` is represented by `ExecutorPolicyDecisionPayload` and mapped by Flow before executor submission. | Optional capability: supported by the interface contract and v0.2.0 RunStatusSnapshot fixtures. Polling support is partial and must report unsupported or unknown instead of fabricating terminal status when the provider does not advertise polling. | Optional capability: supported by the interface contract and v0.2.0 capability variants, including unsupported cancel behavior. Implementations must leave the authoritative run unchanged when cancellation is unsupported or out of scope. | Optional capability: supported by the interface contract and v0.2.0 EvidenceBundleRef fixtures. Evidence reference support is partial; unsupported or unavailable evidence must be reported without embedding evidence bodies, secrets, customer data, or workstation-local paths. | Deferred: production Ensen-loop dispatch, external executor service integration, remote auth, long-running transaction handling, and protocol contract changes in this repository. Missing policy decisions block instead of allowing execution. Ambiguous capability vocabulary is routed to Ensen-protocol instead of redefined in Flow. |
 
+## Controlled Pilot Input Boundary
+
+Track A controlled pilot candidates are dry-run-first. A current Flow input
+surface is pilot-runnable only when it is explicitly fake, local, or dry-run at
+the Flow boundary before owner-controlled real input is considered.
+
+| Surface | Pilot input boundary before Track A completion | Real input handling before Track A completion |
+| --- | --- | --- |
+| schedule trigger | Dry-run/local only: a caller supplies one UTC `scheduledFor` instant to `evaluateScheduleTrigger`; Flow does not subscribe to a scheduler. | Blocked: no scheduler daemon, cloud schedule, calendar feed, or production timezone policy is treated as runnable here. |
+| webhook intake | Fake/local only: `consumeWebhookInput` accepts bounded `flow.webhook.input.v1` fixture objects for declared local paths. | Blocked: no public HTTP listener, production signature validation, trusted proxy normalization, customer webhook, forwarded identity, tenant hint, or credential-bearing payload is accepted. |
+| local file connector | Local fixture only: callers must configure explicit allowed root aliases, and receipts expose only alias plus relative path evidence. | Blocked: no customer files, unrestricted filesystem access, lane-state files, repository mutation, production artifact storage, or credential-shaped roots are accepted. |
+| HTTP notification connector | Fake/dry-run/local only: fake transports declare `mode: "fake"`, and custom transports must declare a fake, local, or dry-run input boundary before `notify` is supported. | Blocked by default: a missing boundary or real transport without explicit dry-run-first evidence and a human-controlled override is treated as unsupported. |
+
+Real input overrides are not inferred from connector names, endpoint aliases,
+workflow metadata, or nearby documentation. A later real-input connector must
+carry explicit dry-run-first evidence plus a human-controlled override at the
+enforcement boundary before Flow can treat it as pilot-runnable.
+
+Customer data, ERPNext live connectors, regulated data, Pharma/GxP workflow
+packs, production notification providers, and compliance-readiness claims remain
+out of scope until later gates explicitly accept them.
+
 ## Routing Later Connector Gaps
 
 Keep later connector gaps narrow and routed to the owning boundary:

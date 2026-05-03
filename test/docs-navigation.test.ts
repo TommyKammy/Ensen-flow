@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 const runbookPath = "docs/controlled-pilot-rollback-recovery-runbook.md";
 const readmePath = "README.md";
 const docsIndexPath = "docs/README.md";
+const operationalEvidenceSnapshotReadmePath =
+  "protocol-snapshots/ensen-protocol/v0.3.0/README.md";
 const posixHomeRootPattern = new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/"));
 const linuxHomeRootPattern = new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/"));
 const windowsHomeRootPattern = new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\"));
@@ -18,6 +20,31 @@ describe("documentation navigation", () => {
 
     expect(readme).toContain("docs/controlled-pilot-rollback-recovery-runbook.md");
     expect(docsIndex).toContain("controlled-pilot-rollback-recovery-runbook.md");
+  });
+
+  it("links the Protocol v0.3.0 operational evidence profile snapshot from public docs", async () => {
+    const [readme, docsIndex, snapshotReadme] = await Promise.all([
+      readFile(readmePath, "utf8"),
+      readFile(docsIndexPath, "utf8"),
+      readFile(operationalEvidenceSnapshotReadmePath, "utf8")
+    ]);
+
+    expect(readme).toContain(
+      "protocol-snapshots/ensen-protocol/v0.3.0/README.md"
+    );
+    expect(readme).toContain(
+      "protocol-snapshots/ensen-protocol/v0.3.0/docs/integration/operational-evidence-profile.md"
+    );
+    expect(docsIndex).toContain(
+      "../protocol-snapshots/ensen-protocol/v0.3.0/README.md"
+    );
+    expect(docsIndex).toContain(
+      "../protocol-snapshots/ensen-protocol/v0.3.0/docs/integration/operational-evidence-profile.md"
+    );
+    expect(snapshotReadme).toContain("release tag `v0.3.0`");
+    expect(snapshotReadme).toContain(
+      "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0"
+    );
   });
 
   it("documents controlled pilot recovery decisions without host-local paths", async () => {

@@ -1,0 +1,41 @@
+{
+  "source": {
+    "repository": "TommyKammy/Ensen-protocol",
+    "releaseTag": "v0.3.0",
+    "releaseUrl": "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0",
+    "protocolVersion": "0.3.0",
+    "tagObjectSha": "080c46471e02d666367b1a18413beb46ebbc2f5b",
+    "targetCommit": "bb7a3fe06dc09bc0675fca0de44194b2eb17dc9b"
+  },
+  "policy": {
+    "updatePolicy": "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
+    "runtimeDependency": false,
+    "copiedArtifactsUnmodified": true
+  },
+  "includes": {
+    "profileDocs": [
+      "docs/integration/operational-evidence-profile.md"
+    ],
+    "fixtureFamilies": [
+      "operational-evidence-profile"
+    ],
+    "publicFixtureSafeExamples": [
+      "fixtures/operational-evidence-profile/v1/valid/public-fixture-safe-profile.json"
+    ]
+  },
+  "validationEvidence": {
+    "recordedFromSourceRelease": true,
+    "commands": [
+      "npm test",
+      "npm run check:fixtures",
+      "npm run check:public-fixtures",
+      "npm run check:schema-ids",
+      "npm run check:spec-boundary"
+    ]
+  },
+  "intentionalExclusions": [
+    "No Ensen-protocol runtime package, SDK, generated client, server, OpenAPI client, scripts, node_modules, tests, or implementation code is vendored into Ensen-flow.",
+    "No production evidence archive, credential source, customer data export, retention system, cleanup workflow, recovery workflow, or compliance evidence claim is introduced by this snapshot.",
+    "The v0.2.0 schema snapshot remains Flow's active EIP schema and connector-contract boundary; v0.3.0 adds only operational evidence profile docs and a public fixture-safe example."
+  ]
+}

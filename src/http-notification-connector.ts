@@ -1,12 +1,18 @@
 import {
   createUnsupportedConnectorOperationResult
 } from "./connector.js";
+import {
+  explainControlledPilotBoundaryRejection
+} from "./controlled-pilot-input-boundary.js";
 import type {
   ConnectorCapabilities,
   ConnectorOperationSupport,
   ConnectorResult,
   ConnectorSubmitRequest
 } from "./connector.js";
+import type {
+  ControlledPilotInputBoundary
+} from "./controlled-pilot-input-boundary.js";
 
 export type HttpNotificationMethod = "POST" | "PUT" | "PATCH";
 export type HttpNotificationOutcomeStatus = "succeeded" | "failed";
@@ -66,6 +72,7 @@ export interface HttpNotificationTransportDelivery {
 }
 
 export interface HttpNotificationTransport {
+  inputBoundary?: ControlledPilotInputBoundary;
   capabilities?: {
     notify?: ConnectorOperationSupport;
   };
@@ -125,7 +132,10 @@ export const createHttpNotificationConnector = (
 ): HttpNotificationConnector => {
   const connectorId = input.connectorId ?? "http-notification";
   const now = input.now ?? (() => new Date().toISOString());
-  const capabilities = createHttpNotificationCapabilities(input.transport.capabilities?.notify);
+  const capabilities = createHttpNotificationCapabilities({
+    notifyOverride: input.transport.capabilities?.notify,
+    inputBoundary: input.transport.inputBoundary
+  });
   const successfulReceipts = new Map<string, IdempotencyRecord>();
   const pendingSubmissions = new Map<string, PendingIdempotencySubmission>();
 
@@ -296,6 +306,7 @@ export const createFakeHttpNotificationTransport = (
       : input.outcomes;
 
   return {
+    inputBoundary: { mode: "fake" },
     capabilities: input.capabilities,
     get deliveries() {
       return deliveries.map((delivery) => ({ ...delivery }));
@@ -308,10 +319,14 @@ export const createFakeHttpNotificationTransport = (
   };
 };
 
-const createHttpNotificationCapabilities = (
-  notifyOverride: ConnectorOperationSupport | undefined
-): HttpNotificationCapabilities => {
-  const notify = notifyOverride ?? { supported: true as const };
+const createHttpNotificationCapabilities = (input: {
+  notifyOverride: ConnectorOperationSupport | undefined;
+  inputBoundary: ControlledPilotInputBoundary | undefined;
+}): HttpNotificationCapabilities => {
+  const notify =
+    input.notifyOverride?.supported === false
+      ? input.notifyOverride
+      : createBoundaryAwareNotifyCapability(input.inputBoundary);
 
   return {
     notify,
@@ -320,6 +335,19 @@ const createHttpNotificationCapabilities = (
     cancel: { supported: false, reason: defaultCancelReason },
     fetchEvidence: { supported: false, reason: defaultEvidenceReason }
   };
+};
+
+const createBoundaryAwareNotifyCapability = (
+  inputBoundary: ControlledPilotInputBoundary | undefined
+): ConnectorOperationSupport => {
+  const rejectionReason = explainControlledPilotBoundaryRejection({
+    surface: "HTTP notification transport",
+    boundary: inputBoundary
+  });
+
+  return rejectionReason === undefined
+    ? { supported: true }
+    : { supported: false, reason: rejectionReason };
 };
 
 const validateSubmitRequest = (request: HttpNotificationSubmitRequest): string | undefined => {

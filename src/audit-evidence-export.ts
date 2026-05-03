@@ -26,13 +26,14 @@ export interface AuditEvidenceExportBoundary {
   productionEvidenceReady: false;
   protocolSnapshot: {
     name: "ensen-protocol";
-    version: "0.2.0";
+    version: "0.3.0";
   };
-  protocolEvidenceProfile: "pending-protocol-phase-4";
+  protocolEvidenceProfile: "operational-evidence-profile.v1";
   notes: string[];
 }
 
 export interface AuditEvidenceExportPublicSafe {
+  profile: AuditEvidenceExportPublicSafeProfile;
   run: {
     runId: string;
     workflowId: string;
@@ -55,6 +56,24 @@ export interface AuditEvidenceExportPublicSafe {
   auditEvents: AuditEvidenceExportAuditEventSummary[];
   evidenceRefs: AuditEvidenceExportEvidenceRef[];
   diagnostics: string[];
+}
+
+export interface AuditEvidenceExportPublicSafeProfile {
+  dataClassification: "public";
+  producerMetadata: {
+    producer: "ensen-flow";
+    producerVersion: "flow.audit-evidence-export.v1";
+    protocolVersion: "0.3.0";
+    command: "export-audit-evidence";
+    boundary: "local-audit-evidence-export";
+    createdBy: "ensen-flow";
+  };
+  retentionHint: "localEphemeral";
+  confidentialReferencePolicy: {
+    allowedInPublicSafe: false;
+    localConfidentialReferenceValuesExported: false;
+    guidance: string;
+  };
 }
 
 export interface AuditEvidenceExportStepSummary {
@@ -92,6 +111,9 @@ export interface AuditEvidenceExportEvidenceRef {
     algorithm: "sha256";
     value: string;
   };
+  dataClassification: "public";
+  referenceKind: "publicSafeArtifactReference";
+  checksumPresence: "present" | "absent";
 }
 
 export interface AuditEvidenceExportLocalConfidentialReferences {
@@ -126,16 +148,34 @@ export const createAuditEvidenceExport = async (
       productionEvidenceReady: false,
       protocolSnapshot: {
         name: "ensen-protocol",
-        version: "0.2.0"
+        version: "0.3.0"
       },
-      protocolEvidenceProfile: "pending-protocol-phase-4",
+      protocolEvidenceProfile: "operational-evidence-profile.v1",
       notes: [
         "This is a deterministic local metadata export skeleton.",
         "It is not a production evidence archive, compliance bundle, or customer data export.",
-        "Protocol Phase 4 evidence profile fields are not fabricated before a protocol snapshot exists."
+        "It uses the copied Protocol v0.3.0 operational evidence profile vocabulary without claiming protocol conformance or production evidence readiness."
       ]
     },
     publicSafe: {
+      profile: {
+        dataClassification: "public",
+        producerMetadata: {
+          producer: "ensen-flow",
+          producerVersion: EXPORT_SCHEMA_VERSION,
+          protocolVersion: "0.3.0",
+          command: "export-audit-evidence",
+          boundary: "local-audit-evidence-export",
+          createdBy: "ensen-flow"
+        },
+        retentionHint: "localEphemeral",
+        confidentialReferencePolicy: {
+          allowedInPublicSafe: false,
+          localConfidentialReferenceValuesExported: false,
+          guidance:
+            "Local confidential reference values stay in localConfidentialReferences placeholders and are never emitted in publicSafe output."
+        }
+      },
       run: {
         runId: state.run.runId,
         workflowId: state.run.workflowId,
@@ -365,7 +405,10 @@ const normalizeEvidenceRef = (
     uri: value.uri,
     createdAt: value.createdAt,
     ...(typeof value.contentType === "string" ? { contentType: value.contentType } : {}),
-    ...(checksum === undefined ? {} : { checksum })
+    ...(checksum === undefined ? {} : { checksum }),
+    dataClassification: "public",
+    referenceKind: "publicSafeArtifactReference",
+    checksumPresence: checksum === undefined ? "absent" : "present"
   };
 };
 
@@ -420,7 +463,7 @@ const createUnsafeEvidenceRefDiagnostic = (ref: AuditEvidenceExportEvidenceRef):
 };
 
 const isPublicSafeFileUri = (_value: string): boolean =>
-  // Protocol Phase 4 has not defined a public evidence profile for file: URIs.
+  // Flow has not adopted a public-safe file: URI mapping for local exports.
   false;
 
 const isWindowsDriveAbsolutePath = (value: string): boolean =>

@@ -143,10 +143,13 @@ type, step attempts, neutral audit event summaries, and any public-safe
 `eip.evidence-bundle-ref.v1` references found in step result metadata. Trigger
 context, idempotency key values, raw local state paths, raw audit paths,
 workstation-local evidence paths, secrets, customer data, production evidence
-locations, and unsupported Protocol Phase 4 evidence profile fields are not
-exported into the public-safe section. `file_uri` evidence references are
-omitted from public-safe exports until a later protocol evidence profile defines
-a deliberately public mapping; portable relative `local_path` references remain
+locations, and local confidential reference values are not exported into the
+public-safe section. The export boundary uses the copied Protocol v0.3.0
+operational evidence profile vocabulary for public data classification,
+bounded producer metadata, retention hints, checksum presence, and confidential
+reference policy facts without claiming production evidence readiness. `file_uri`
+evidence references are omitted from public-safe exports until Flow adopts a
+deliberately public mapping; portable relative `local_path` references remain
 exportable.
 
 Workflow artifact hygiene is fail-closed at the local JSONL boundary and at

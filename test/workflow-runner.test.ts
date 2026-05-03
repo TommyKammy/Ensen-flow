@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   appendWorkflowRunEvent,
   createWorkflowRun,
+  inspectWorkflowRunRecovery,
   readWorkflowRunState,
   runWorkflow
 } from "../src/index.js";
@@ -471,6 +472,128 @@ describe("sequential workflow runner", () => {
     });
   });
 
+  it("classifies a partial connector failure as retryable and preserves recovery evidence", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.id = "connector-partial-recovery-demo";
+    definition.steps = [
+      {
+        id: "dispatch-local-connector",
+        action: {
+          type: "local",
+          name: "partial_failure_connector"
+        },
+        retry: {
+          maxAttempts: 2,
+          backoff: {
+            strategy: "fixed",
+            delayMs: 1000
+          }
+        }
+      }
+    ];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "connector-partial-recovery"
+      },
+      now: createClock([
+        "2026-05-03T00:00:00.000Z",
+        "2026-05-03T00:00:00.000Z",
+        "2026-05-03T00:00:01.000Z",
+        "2026-05-03T00:00:02.000Z",
+        "2026-05-03T00:00:03.000Z",
+        "2026-05-03T00:00:04.000Z",
+        "2026-05-03T00:00:05.000Z"
+      ]),
+      stepHandler: ({ attempt }) =>
+        attempt === 1
+          ? ({
+              requestId: "req_connector_partial_recovery_1",
+              status: "failed",
+              observedAt: "2026-05-03T00:00:02.000Z",
+              result: {
+                status: "failed",
+                summary: "local connector accepted the request but lost the completion receipt",
+                evidence: {
+                  connectorId: "partial-failure-connector",
+                  recoveryClass: "retryable",
+                  localReceiptRef: "evidence/partial-failure/receipt.json"
+                }
+              }
+            } satisfies ExecutorConnectorStatusSnapshot)
+          : ({
+              requestId: "req_connector_partial_recovery_2",
+              status: "succeeded",
+              observedAt: "2026-05-03T00:00:04.000Z",
+              result: {
+                status: "succeeded",
+                summary: "local connector replay observed the prior receipt",
+                evidence: {
+                  connectorId: "partial-failure-connector",
+                  recoveryClass: "recovered",
+                  localReceiptRef: "evidence/partial-failure/receipt.json"
+                }
+              }
+            } satisfies ExecutorConnectorStatusSnapshot)
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.stepAttempts["dispatch-local-connector"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "retryable-failed",
+        retry: {
+          retryable: true,
+          nextAttemptAt: "2026-05-03T00:00:03.000Z",
+          reason: "local connector accepted the request but lost the completion receipt"
+        },
+        result: {
+          executor: {
+            requestId: "req_connector_partial_recovery_1",
+            status: "failed",
+            result: {
+              evidence: {
+                recoveryClass: "retryable",
+                localReceiptRef: "evidence/partial-failure/receipt.json"
+              }
+            }
+          }
+        }
+      },
+      {
+        attempt: 2,
+        status: "succeeded",
+        result: {
+          executor: {
+            status: "succeeded",
+            result: {
+              evidence: {
+                recoveryClass: "recovered"
+              }
+            }
+          }
+        }
+      }
+    ]);
+
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.map((event) => event.type)).toEqual([
+      "workflow.started",
+      "step.started",
+      "step.failed",
+      "step.retry.scheduled",
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
+    expect(JSON.stringify(result)).not.toContain(tmpdir());
+  });
+
   it("records failed steps with diagnostic retry metadata", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
@@ -702,6 +825,93 @@ describe("sequential workflow runner", () => {
     }
   );
 
+  it("keeps Loop executor connector failure as executor evidence, not Flow-owned lane state", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.id = "loop-executor-partial-failure-demo";
+    definition.steps = [
+      {
+        id: "loop-executor-dispatch",
+        action: {
+          type: "local",
+          name: "ensen_loop_eip_executor"
+        }
+      }
+    ];
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "loop-executor-partial-failure"
+      },
+      now: createClock([
+        "2026-05-03T00:10:00.000Z",
+        "2026-05-03T00:10:00.000Z",
+        "2026-05-03T00:10:01.000Z",
+        "2026-05-03T00:10:02.000Z",
+        "2026-05-03T00:10:03.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_loop_executor_partial_failure",
+          status: "failed",
+          observedAt: "2026-05-03T00:10:02.000Z",
+          result: {
+            status: "failed",
+            summary: "Ensen-loop executor connector returned a loop-gap failure",
+            evidence: {
+              connectorId: "ensen-loop-eip",
+              failureClass: "loop-gap",
+              operation: "status",
+              localArtifactSemantics: "local-development-references-only"
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["loop-executor-dispatch"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "Ensen-loop executor connector returned a loop-gap failure"
+        },
+        result: {
+          executor: {
+            requestId: "req_loop_executor_partial_failure",
+            status: "failed",
+            result: {
+              evidence: {
+                connectorId: "ensen-loop-eip",
+                failureClass: "loop-gap",
+                operation: "status",
+                localArtifactSemantics: "local-development-references-only"
+              }
+            }
+          }
+        }
+      }
+    ]);
+    expect(JSON.stringify(result.stepAttempts["loop-executor-dispatch"][0].result)).not.toContain(
+      "laneState"
+    );
+    expect(JSON.stringify(result.stepAttempts["loop-executor-dispatch"][0].result)).not.toContain(
+      "flowOwnedLane"
+    );
+
+    await expect(inspectWorkflowRunRecovery(statePath)).resolves.toMatchObject({
+      classification: "terminal",
+      action: "do-not-replay",
+      run: {
+        status: "failed",
+        terminalState: "failed"
+      }
+    });
+  });
+
   it("returns the existing terminal run when the idempotency key matches", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
@@ -751,3 +961,9 @@ describe("sequential workflow runner", () => {
     ).rejects.toThrow("existing workflow run state has a different idempotency key");
   });
 });
+
+const createClock = (timestamps: string[]): (() => string) => {
+  let index = 0;
+
+  return () => timestamps[Math.min(index++, timestamps.length - 1)];
+};

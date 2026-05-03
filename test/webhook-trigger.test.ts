@@ -46,6 +46,45 @@ afterEach(async () => {
 });
 
 describe("webhook trigger controlled pilot boundary", () => {
+  it("replays identical webhook input deterministically without appending recovery noise", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const input = createWebhookInput();
+
+    const first = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input,
+      now: createClock([
+        "2026-05-03T01:00:00.000Z",
+        "2026-05-03T01:00:00.000Z",
+        "2026-05-03T01:00:01.000Z",
+        "2026-05-03T01:00:02.000Z",
+        "2026-05-03T01:00:03.000Z",
+        "2026-05-03T01:00:04.000Z"
+      ])
+    });
+    const expectedRunId = createExpectedWebhookRunId(definition.id, input.requestId);
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+    const stateBeforeReplay = await readFile(statePath, "utf8");
+    const auditBeforeReplay = await readFile(auditPath, "utf8");
+
+    const replay = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input,
+      now: createClock(["2026-05-03T01:01:00.000Z"])
+    });
+
+    expect(replay).toEqual(first);
+    await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
+    await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
+  });
+
   it("keeps webhook intake fake/local and rejects changed requestId replays without extra state", async () => {
     const definition = createWebhookWorkflow();
     const root = await createTempRoot();
@@ -80,3 +119,9 @@ describe("webhook trigger controlled pilot boundary", () => {
     );
   });
 });
+
+const createClock = (timestamps: string[]): (() => string) => {
+  let index = 0;
+
+  return () => timestamps[Math.min(index++, timestamps.length - 1)];
+};

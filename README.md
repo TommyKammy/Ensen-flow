@@ -60,6 +60,9 @@ authority, and no premature compliance claims.
 - `docs/loop-flow-protocol-v0.2.0-connection-smoke.md`: pre-Phase 5
   Protocol v0.2.0 Loop-Flow connection smoke, capability checks, focused
   commands, and failure routing.
+- `protocol-snapshots/ensen-protocol/v0.3.0/README.md`: copied Protocol
+  v0.3.0 operational evidence profile snapshot for X-Gate 3 Track A artifact
+  hygiene, with the source release tag and release URL recorded locally.
 
 ## Workflow Definition Schema
 
@@ -181,6 +184,24 @@ The older v0.1.0 snapshot remains in this repository as historical fixture data
 for compatibility review only. New connector conformance and Phase 5 planning
 should use the v0.2.0 snapshot boundary unless a test explicitly documents a
 retained compatibility behavior.
+
+The copied Ensen-protocol v0.3.0 operational evidence profile snapshot is
+documented in `protocol-snapshots/ensen-protocol/v0.3.0/README.md`, with the
+profile doc at
+`protocol-snapshots/ensen-protocol/v0.3.0/docs/integration/operational-evidence-profile.md`
+and the public fixture-safe example at
+`protocol-snapshots/ensen-protocol/v0.3.0/fixtures/operational-evidence-profile/v1/valid/public-fixture-safe-profile.json`.
+It records source release tag `v0.3.0` and release URL
+`https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0`. This
+snapshot is a local contract reference for X-Gate 3 Track A evidence work; it
+does not introduce a runtime dependency, production evidence archive, customer
+data export, credential source, retention system, cleanup workflow, recovery
+workflow, or compliance evidence claim.
+
+Future Protocol profile updates should be adopted by adding a new versioned
+snapshot directory from a tagged Ensen-protocol release, recording the release
+tag and release URL in that directory's manifest, and updating this navigation
+without pointing Flow runtime code or tests at a sibling checkout.
 
 ## Local Sequential Runner
 

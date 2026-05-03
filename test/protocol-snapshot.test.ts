@@ -14,6 +14,21 @@ const snapshotRoot = join(
   "ensen-protocol",
   "v0.2.0"
 );
+const operationalEvidenceSnapshotRoot = join(
+  process.cwd(),
+  "protocol-snapshots",
+  "ensen-protocol",
+  "v0.3.0"
+);
+const unsafeSnapshotTextPatterns = [
+  new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/")),
+  new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/")),
+  new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\")),
+  /AKIA[0-9A-Z]{16}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\b(?:password|secret|token|api[_-]?key)=\S+/i,
+  /\b(?:postgres|mysql|mongodb):\/\/[^<\s]+:[^<\s]+@/i
+];
 
 const expectedSchemas = [
   "schemas/eip.audit-event.v1.schema.json",
@@ -42,6 +57,13 @@ const fixtureFamiliesWithInvalidFixtures = expectedFixtureFamilies.filter(
 
 const readJson = async (relativePath: string): Promise<unknown> =>
   JSON.parse(await readFile(join(snapshotRoot, relativePath), "utf8")) as unknown;
+
+const readOperationalEvidenceJson = async (
+  relativePath: string
+): Promise<unknown> =>
+  JSON.parse(
+    await readFile(join(operationalEvidenceSnapshotRoot, relativePath), "utf8")
+  ) as unknown;
 
 const listJsonFixtures = async (relativePath: string): Promise<string[]> => {
   const entries = await readdir(join(snapshotRoot, relativePath), {
@@ -199,5 +221,100 @@ describe("Ensen-protocol snapshot boundary", () => {
     expect(isSupportedEipProtocolVersion("0.2.0")).toBe(true);
     expect(isSupportedEipProtocolVersion("1.0.0")).toBe(false);
     expect(isSupportedEipProtocolVersion("bad-version")).toBe(false);
+  });
+
+  it("vendors the Ensen-protocol v0.3.0 operational evidence profile snapshot", async () => {
+    await expect(
+      readOperationalEvidenceJson("manifest.json")
+    ).resolves.toEqual({
+      source: {
+        repository: "TommyKammy/Ensen-protocol",
+        releaseTag: "v0.3.0",
+        releaseUrl:
+          "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0",
+        protocolVersion: "0.3.0",
+        tagObjectSha: "080c46471e02d666367b1a18413beb46ebbc2f5b",
+        targetCommit: "bb7a3fe06dc09bc0675fca0de44194b2eb17dc9b"
+      },
+      policy: {
+        updatePolicy:
+          "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
+        runtimeDependency: false,
+        copiedArtifactsUnmodified: true
+      },
+      includes: {
+        profileDocs: ["docs/integration/operational-evidence-profile.md"],
+        fixtureFamilies: ["operational-evidence-profile"],
+        publicFixtureSafeExamples: [
+          "fixtures/operational-evidence-profile/v1/valid/public-fixture-safe-profile.json"
+        ]
+      },
+      validationEvidence: {
+        recordedFromSourceRelease: true,
+        commands: [
+          "npm test",
+          "npm run check:fixtures",
+          "npm run check:public-fixtures",
+          "npm run check:schema-ids",
+          "npm run check:spec-boundary"
+        ]
+      },
+      intentionalExclusions: expect.arrayContaining([
+        expect.stringContaining("No Ensen-protocol runtime"),
+        expect.stringContaining("No production evidence archive"),
+        expect.stringContaining("v0.2.0 schema snapshot remains")
+      ])
+    });
+
+    const profileDoc = await readFile(
+      join(
+        operationalEvidenceSnapshotRoot,
+        "docs/integration/operational-evidence-profile.md"
+      ),
+      "utf8"
+    );
+    const publicExample = (await readOperationalEvidenceJson(
+      "fixtures/operational-evidence-profile/v1/valid/public-fixture-safe-profile.json"
+    )) as {
+      evidence?: { dataClassification?: unknown; checksum?: unknown };
+      producerMetadata?: Record<string, unknown>;
+      confidentialReferencePolicy?: { allowedInPublicFixture?: unknown };
+      retentionHint?: unknown;
+    };
+
+    expect(profileDoc).toContain("Operational Evidence Profile");
+    expect(profileDoc).toContain("not artifact storage, not cleanup, not recovery");
+    expect(publicExample.evidence?.dataClassification).toBe("public");
+    expect(publicExample.evidence?.checksum).toEqual({
+      algorithm: "sha256",
+      value: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    });
+    expect(publicExample.producerMetadata).toEqual(
+      expect.objectContaining({
+        command: "npm test",
+        boundary: "parser"
+      })
+    );
+    expect(publicExample.retentionHint).toBe("publicFixture");
+    expect(publicExample.confidentialReferencePolicy?.allowedInPublicFixture).toBe(
+      false
+    );
+
+    for (const snapshotText of [
+      await readFile(
+        join(operationalEvidenceSnapshotRoot, "README.md"),
+        "utf8"
+      ),
+      await readFile(
+        join(operationalEvidenceSnapshotRoot, "manifest.json"),
+        "utf8"
+      ),
+      profileDoc,
+      JSON.stringify(publicExample, null, 2)
+    ]) {
+      for (const unsafePattern of unsafeSnapshotTextPatterns) {
+        expect(snapshotText).not.toMatch(unsafePattern);
+      }
+    }
   });
 });

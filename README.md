@@ -57,6 +57,10 @@ authority, and no premature compliance claims.
   JSONL state recovery, approval/retry/idempotency recovery, notification
   misfire and webhook replay handling, and cleanup boundaries that preserve
   audit/evidence history.
+- `docs/x-gate3-track-a-flow-closure.md`: Flow-side X-Gate 3 Track A closure
+  review with completed issue/PR evidence, Flow commit snapshot, Protocol
+  `v0.3.0` release evidence, verification commands, and remaining non-Flow
+  blockers.
 - `docs/loop-flow-protocol-v0.2.0-connection-smoke.md`: pre-Phase 5
   Protocol v0.2.0 Loop-Flow connection smoke, capability checks, focused
   commands, and failure routing.

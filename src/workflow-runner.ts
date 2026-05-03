@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   appendWorkflowRunEvent,
@@ -134,7 +135,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         throw error;
       }
 
-      const competingState = await readWorkflowRunState(input.statePath);
+      const competingState = await readCompetingRunState(input.statePath);
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
       input.existingRunStateGuard?.(competingState);
       if (competingState.run.terminalState !== undefined) {
@@ -483,6 +484,26 @@ const readExistingRunState = async (statePath: string): Promise<WorkflowRunState
     throw error;
   }
 };
+
+const readCompetingRunState = async (statePath: string): Promise<WorkflowRunState> => {
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await readWorkflowRunState(statePath);
+    } catch (error) {
+      if (!isTransientRunCreationRead(error) || attempt === maxAttempts) {
+        throw error;
+      }
+      await delay(5);
+    }
+  }
+
+  return readWorkflowRunState(statePath);
+};
+
+const isTransientRunCreationRead = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message === "workflow run state must contain a run.created record";
 
 const assertExistingRunMatches = (
   existingState: WorkflowRunState,

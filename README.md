@@ -126,6 +126,16 @@ workstation-local evidence paths, secrets, customer data, production evidence
 locations, and unsupported Protocol Phase 4 evidence profile fields are not
 exported into the public-safe section.
 
+Workflow artifact hygiene is fail-closed at the local JSONL boundary and at
+public export boundaries. Raw secrets, token-shaped strings, private key blocks,
+session cookie strings, and workstation-local absolute paths are rejected before
+new run state or notification artifacts are written. Public audit/evidence
+exports omit unsafe evidence references and report only the failing category in
+diagnostics; the matched value stays out of public-safe output. The
+`localConfidentialReferences` section is the placeholder boundary for local-only
+state, audit, and export file references until a later Protocol evidence profile
+defines a formal mapping.
+
 This internal shape is intended to support a later mapping to EIP AuditEvent,
 but it does not claim EIP conformance and does not import Ensen-protocol runtime
 packages. Formal protocol mapping belongs to a later protocol or connector

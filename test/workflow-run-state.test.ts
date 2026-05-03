@@ -428,6 +428,40 @@ describe("workflow run JSONL state", () => {
     await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it.each([
+    {
+      context: { authorization: "Bearer ghp_placeholderUnsafeToken123" },
+      message:
+        "trigger.context.authorization must not contain unsafe workflow artifact values (category: token)"
+    },
+    {
+      context: { evidencePath: ["", "home", "operator", "flow", "state.jsonl"].join("/") },
+      message:
+        "trigger.context.evidencePath must not contain unsafe workflow artifact values (category: workstation-local-path)"
+    }
+  ])(
+    "rejects unsafe trigger context artifact values before writing %#",
+    async ({ context, message }) => {
+      const statePath = await createTempStatePath();
+
+      await expect(
+        createWorkflowRun(statePath, {
+          runId: "run-unsafe-trigger-context",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: {
+            type: "manual",
+            receivedAt: "2026-04-29T00:00:00.000Z",
+            context
+          },
+          createdAt: "2026-04-29T00:00:01.000Z"
+        })
+      ).rejects.toThrow(`workflow run state line 1: ${message}`);
+
+      await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  );
+
   it.each(["succeeded", "failed", "canceled", "retryable-failed"] as const)(
     "represents %s as a distinct terminal state",
     async (terminalState) => {
@@ -854,6 +888,57 @@ describe("workflow run JSONL state", () => {
 
     const persisted = await readWorkflowRunState(statePath);
     expect(persisted.events.map((event) => event.type)).toEqual(["run.created"]);
+  });
+
+  it("rejects unsafe terminal result artifact values before appending", async () => {
+    const statePath = await createTempStatePath();
+    const privateKeyBlock = [
+      "-----BEGIN PRIVATE KEY-----",
+      "placeholderUnsafeKey",
+      "-----END PRIVATE KEY-----"
+    ].join("\n");
+
+    await createWorkflowRun(statePath, {
+      runId: "run-unsafe-result",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-unsafe-result",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+
+    await expect(
+      appendWorkflowRunEvent(statePath, {
+        type: "step.attempt.completed",
+        runId: "run-unsafe-result",
+        stepId: "collect-input",
+        attempt: 1,
+        occurredAt: "2026-04-29T00:00:03.000Z",
+        result: {
+          evidence: {
+            keyMaterial: privateKeyBlock
+          }
+        }
+      })
+    ).rejects.toThrow(
+      "workflow run state line 1: result.evidence.keyMaterial must not contain unsafe workflow artifact values (category: private-key)"
+    );
+
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started"
+    ]);
+    expect(JSON.stringify(persisted)).not.toContain("placeholderUnsafeKey");
   });
 
   it("fails closed on duplicate terminal step attempt transitions", async () => {

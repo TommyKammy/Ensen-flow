@@ -217,11 +217,10 @@ describe("neutral audit event writer", () => {
     );
   });
 
-  it("omits Windows-style local evidence paths from public-safe exports", async () => {
+  it("omits non-public evidence paths from public-safe exports", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot);
     const statePath = join(stateRoot, "runs", "manual-run.jsonl");
-    const windowsDrivePath = ["C:", "tmp", "bundle.json"].join("\\");
     const windowsNetworkPath = ["", "", "server", "share", "bundle.json"].join("\\");
 
     await createWorkflowRun(statePath, {
@@ -260,26 +259,10 @@ describe("neutral audit event writer", () => {
           },
           {
             schemaVersion: "eip.evidence-bundle-ref.v1",
-            id: "evb_windows_drive_export",
-            correlationId: "corr_manual_export",
-            type: "local_path",
-            uri: windowsDrivePath,
-            createdAt: "2026-04-29T00:00:02.000Z"
-          },
-          {
-            schemaVersion: "eip.evidence-bundle-ref.v1",
             id: "evb_windows_network_export",
             correlationId: "corr_manual_export",
             type: "local_path",
             uri: windowsNetworkPath,
-            createdAt: "2026-04-29T00:00:02.000Z"
-          },
-          {
-            schemaVersion: "eip.evidence-bundle-ref.v1",
-            id: "evb_windows_file_uri_export",
-            correlationId: "corr_manual_export",
-            type: "file_uri",
-            uri: "file:///C:/tmp/bundle.json",
             createdAt: "2026-04-29T00:00:02.000Z"
           },
           {
@@ -300,12 +283,9 @@ describe("neutral audit event writer", () => {
       "artifacts/evidence/public/bundle.json"
     ]);
     expect(exported.publicSafe.diagnostics).toEqual([
-      "omitted an evidence reference because its URI is not public-safe",
-      "omitted an evidence reference because its URI is not public-safe",
-      "omitted an evidence reference because its URI is not public-safe",
-      "omitted an evidence reference because its URI is not public-safe"
+      "omitted an evidence reference because its URI is not public-safe (category: non-public-uri)",
+      "omitted an evidence reference because its URI is not public-safe (category: non-public-uri)"
     ]);
-    expect(JSON.stringify(exported)).not.toContain(windowsDrivePath);
     expect(JSON.stringify(exported)).not.toContain(windowsNetworkPath);
   });
 

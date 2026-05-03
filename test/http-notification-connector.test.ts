@@ -111,6 +111,31 @@ describe("HTTP notification connector skeleton", () => {
     expect(transport.deliveries).toHaveLength(1);
   });
 
+  it("rejects unsafe notification artifact values with sanitized diagnostics", async () => {
+    const transport = createFakeHttpNotificationTransport();
+    const connector = createHttpNotificationConnector({ transport });
+    const submitted = await connector.submit({
+      ...notifyRequest,
+      notification: {
+        endpointAlias: "local-operator-notification",
+        payload: {
+          message: "session_id=placeholderUnsafeSession"
+        }
+      }
+    });
+
+    expect(submitted).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid-request",
+        message:
+          "HTTP notification fixture notificationRequest.notification.payload.message must not contain unsafe workflow artifact values (category: session-cookie)"
+      }
+    });
+    expect(JSON.stringify(submitted)).not.toContain("placeholderUnsafeSession");
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
   it("serializes concurrent same-key submits before transport delivery completes", async () => {
     const deliveries: HttpNotificationTransportDelivery[] = [];
     const delivery = createDeferred<HttpNotificationOutcome>();

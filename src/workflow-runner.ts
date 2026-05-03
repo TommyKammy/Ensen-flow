@@ -14,7 +14,8 @@ import type {
 import type {
   WorkflowRunIdempotencyMetadata,
   WorkflowStepAttemptResultMetadata,
-  WorkflowRunState
+  WorkflowRunState,
+  WorkflowStepAttemptState
 } from "./workflow-run-state.js";
 import {
   eipVersionBoundary,
@@ -108,46 +109,64 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     if (existingState.run.terminalState !== undefined) {
       return existingState;
     }
-    throw new Error("workflow run state already exists but is not terminal; resume is out of scope");
-  }
+    assertExistingRunRecoverable(existingState, orderedSteps);
+  } else {
+    const triggerReceivedAt = now();
+    const createdAt = now();
+    let createdNewRun = false;
+    try {
+      await createWorkflowRun(input.statePath, {
+        runId,
+        workflowId: input.definition.id,
+        workflowVersion: workflowDefinitionSchemaVersion,
+        trigger: {
+          type: input.definition.trigger.type,
+          receivedAt: triggerReceivedAt,
+          context: triggerContext,
+          ...(triggerIdempotencyKey === undefined ? {} : { idempotencyKey: triggerIdempotencyKey })
+        },
+        createdAt
+      });
+      createdNewRun = true;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") {
+        throw error;
+      }
 
-  const triggerReceivedAt = now();
-  const createdAt = now();
-  try {
-    await createWorkflowRun(input.statePath, {
-      runId,
-      workflowId: input.definition.id,
-      workflowVersion: workflowDefinitionSchemaVersion,
-      trigger: {
-        type: input.definition.trigger.type,
-        receivedAt: triggerReceivedAt,
-        context: triggerContext,
-        ...(triggerIdempotencyKey === undefined ? {} : { idempotencyKey: triggerIdempotencyKey })
-      },
-      createdAt
-    });
-  } catch (error) {
-    if (!isNodeError(error) || error.code !== "EEXIST") {
-      throw error;
+      const competingState = await readWorkflowRunState(input.statePath);
+      assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
+      input.existingRunStateGuard?.(competingState);
+      if (competingState.run.terminalState !== undefined) {
+        return competingState;
+      }
+      assertExistingRunRecoverable(competingState, orderedSteps);
     }
-
-    const competingState = await readWorkflowRunState(input.statePath);
-    assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
-    input.existingRunStateGuard?.(competingState);
-    if (competingState.run.terminalState !== undefined) {
-      return competingState;
+    if (createdNewRun) {
+      await auditWriter?.write({
+        type: "workflow.started",
+        occurredAt: createdAt
+      });
     }
-    throw new Error("workflow run state already exists but is not terminal; resume is out of scope");
   }
-  await auditWriter?.write({
-    type: "workflow.started",
-    occurredAt: createdAt
-  });
 
   for (const step of orderedSteps) {
     const retryPolicy = step.retry ?? { maxAttempts: 1, backoff: { strategy: "none" as const } };
+    const latestAttempt = latestStepAttempt(
+      (await readWorkflowRunState(input.statePath)).stepAttempts[step.id]
+    );
+    if (latestAttempt?.status === "succeeded") {
+      continue;
+    }
 
-    for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+    const firstAttempt =
+      latestAttempt?.status === "retryable-failed" ? latestAttempt.attempt + 1 : 1;
+    if (firstAttempt > retryPolicy.maxAttempts) {
+      throw new Error(
+        `existing workflow run state cannot resume ${step.id}; retry policy has no remaining attempts`
+      );
+    }
+
+    for (let attempt = firstAttempt; attempt <= retryPolicy.maxAttempts; attempt += 1) {
       const startedAt = now();
       await appendWorkflowRunEvent(input.statePath, {
         type: "step.attempt.started",
@@ -417,6 +436,58 @@ const assertExistingRunMatches = (
     throw new Error("existing workflow run state has a different runId");
   }
 };
+
+const assertExistingRunRecoverable = (
+  existingState: WorkflowRunState,
+  orderedSteps: WorkflowStep[]
+): void => {
+  let sawIncompleteStep = false;
+
+  for (const step of orderedSteps) {
+    const latestAttempt = latestStepAttempt(existingState.stepAttempts[step.id]);
+    if (latestAttempt?.status === "succeeded") {
+      if (sawIncompleteStep) {
+        throw new Error(
+          `existing workflow run state references step ${step.id} after an incomplete earlier step; manual repair is required before recovery`
+        );
+      }
+      continue;
+    }
+
+    if (latestAttempt !== undefined && sawIncompleteStep) {
+      throw new Error(
+        `existing workflow run state references step ${step.id} after an incomplete earlier step; manual repair is required before recovery`
+      );
+    }
+
+    sawIncompleteStep = true;
+  }
+
+  for (const [stepId, attempts] of Object.entries(existingState.stepAttempts)) {
+    if (!orderedSteps.some((step) => step.id === stepId)) {
+      throw new Error(
+        `existing workflow run state references unknown step ${stepId}; manual repair is required before recovery`
+      );
+    }
+
+    const latestAttempt = latestStepAttempt(attempts);
+    if (latestAttempt?.status === "running") {
+      throw new Error(
+        `existing workflow run state has active step attempt ${stepId}#${latestAttempt.attempt}; manual repair is required before recovery`
+      );
+    }
+
+    if (latestAttempt?.status === "failed") {
+      throw new Error(
+        `existing workflow run state has failed non-terminal step ${stepId}#${latestAttempt.attempt}; manual repair is required before recovery`
+      );
+    }
+  }
+};
+
+const latestStepAttempt = (
+  attempts: WorkflowStepAttemptState[] | undefined
+): WorkflowStepAttemptState | undefined => attempts?.at(-1);
 
 const orderSteps = (steps: WorkflowStep[]): WorkflowStep[] => {
   const remaining = new Map(steps.map((step) => [step.id, step]));

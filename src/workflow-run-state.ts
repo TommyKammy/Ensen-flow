@@ -160,6 +160,51 @@ export interface WorkflowRunState {
 
 export type WorkflowStepAttemptResultMetadata = Record<string, unknown>;
 
+export type WorkflowRunRecoveryClassification =
+  | "recoverable"
+  | "terminal"
+  | "corrupt"
+  | "manual-repair-needed";
+
+export type WorkflowRunRecoveryAction =
+  | "resume-from-projected-state"
+  | "do-not-replay"
+  | "repair-jsonl-before-recovery"
+  | "operator-review-required";
+
+export interface WorkflowRunRecoveryReport {
+  classification: WorkflowRunRecoveryClassification;
+  action: WorkflowRunRecoveryAction;
+  diagnostic: string;
+  historyPreserved: true;
+  run?: WorkflowRunRecoveryRunSummary;
+  eventCount?: number;
+  activeStepAttempts?: WorkflowRunRecoveryStepAttemptSummary[];
+}
+
+export interface WorkflowRunRecoveryRunSummary {
+  runId: string;
+  workflowId: string;
+  workflowVersion: string;
+  status: WorkflowRunStatus;
+  terminalState?: WorkflowRunTerminalState;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowRunRecoveryStepAttemptSummary {
+  stepId: string;
+  attempt: number;
+  status: WorkflowStepAttemptState["status"];
+  startedAt?: string;
+}
+
+export interface StopWorkflowRunRecoveryInput {
+  statePath: string;
+  runId: string;
+  stoppedAt: string;
+}
+
 export const createWorkflowRun = async (
   statePath: string,
   input: CreateWorkflowRunInput
@@ -230,6 +275,109 @@ export const readWorkflowRunState = async (
   const events = parseWorkflowRunEvents(contents);
 
   return projectWorkflowRunEvents(events);
+};
+
+export const inspectWorkflowRunRecovery = async (
+  statePath: string
+): Promise<WorkflowRunRecoveryReport> => {
+  let state: WorkflowRunState;
+  try {
+    state = await readWorkflowRunState(statePath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return {
+        classification: "manual-repair-needed",
+        action: "operator-review-required",
+        diagnostic: "workflow run state file is missing; recovery requires existing JSONL state",
+        historyPreserved: true
+      };
+    }
+
+    return {
+      classification: "corrupt",
+      action: "repair-jsonl-before-recovery",
+      diagnostic: sanitizeRecoveryDiagnostic(error),
+      historyPreserved: true
+    };
+  }
+
+  const run = summarizeRecoveryRun(state.run);
+  if (state.run.terminalState !== undefined) {
+    return {
+      classification: "terminal",
+      action: "do-not-replay",
+      diagnostic: `workflow run ${state.run.runId} is terminal (${state.run.terminalState}); recovery must not replay active work`,
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length
+    };
+  }
+
+  const activeStepAttempts = summarizeActiveStepAttempts(state.stepAttempts);
+  if (activeStepAttempts.length > 0) {
+    return {
+      classification: "manual-repair-needed",
+      action: "operator-review-required",
+      diagnostic:
+        "workflow run has active step attempts; operator review is required before stop or retry because local state cannot prove external side effects",
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length,
+      activeStepAttempts
+    };
+  }
+
+  if (hasFailedNonTerminalStepAttempt(state.stepAttempts)) {
+    return {
+      classification: "manual-repair-needed",
+      action: "operator-review-required",
+      diagnostic:
+        "workflow run has failed non-terminal step attempts; operator review is required before recovery because the run should have recorded a terminal state",
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length
+    };
+  }
+
+  return {
+    classification: "recoverable",
+    action: "resume-from-projected-state",
+    diagnostic:
+      "workflow run is non-terminal and has no active step attempt; recovery can continue from projected JSONL state",
+    historyPreserved: true,
+    run,
+    eventCount: state.events.length
+  };
+};
+
+export const stopWorkflowRunRecovery = async (
+  input: StopWorkflowRunRecoveryInput
+): Promise<WorkflowRunRecoveryReport> => {
+  const report = await inspectWorkflowRunRecovery(input.statePath);
+  if (report.classification === "corrupt") {
+    throw new Error(`cannot stop corrupt workflow run state: ${report.diagnostic}`);
+  }
+
+  if (report.run === undefined) {
+    throw new Error(`cannot stop workflow run state: ${report.diagnostic}`);
+  }
+
+  if (report.run.runId !== input.runId) {
+    throw new Error("cannot stop workflow run state: runId must match projected JSONL state");
+  }
+
+  if (report.classification === "terminal") {
+    return report;
+  }
+
+  await appendWorkflowRunEvent(input.statePath, {
+    type: "run.completed",
+    runId: input.runId,
+    terminalState: "canceled",
+    occurredAt: input.stoppedAt
+  });
+
+  return inspectWorkflowRunRecovery(input.statePath);
 };
 
 const projectWorkflowRunEvents = (events: WorkflowRunEvent[]): WorkflowRunState => {
@@ -593,6 +741,48 @@ const missingWorkflowRunStateError = (): Error =>
   new Error(
     "appendWorkflowRunEvent requires an existing workflow run state file; call createWorkflowRun before appendWorkflowRunEvent so readWorkflowRunState can project a stream with run.created"
   );
+
+const summarizeRecoveryRun = (run: WorkflowRunRecord): WorkflowRunRecoveryRunSummary => ({
+  runId: run.runId,
+  workflowId: run.workflowId,
+  workflowVersion: run.workflowVersion,
+  status: run.status,
+  terminalState: run.terminalState,
+  createdAt: run.createdAt,
+  updatedAt: run.updatedAt
+});
+
+const summarizeActiveStepAttempts = (
+  stepAttempts: Record<string, WorkflowStepAttemptState[]>
+): WorkflowRunRecoveryStepAttemptSummary[] =>
+  Object.entries(stepAttempts).flatMap(([stepId, attempts]) =>
+    attempts
+      .filter((attempt) => attempt.status === "running")
+      .map((attempt) => ({
+        stepId,
+        attempt: attempt.attempt,
+        status: attempt.status,
+        startedAt: attempt.startedAt
+      }))
+  );
+
+const hasFailedNonTerminalStepAttempt = (
+  stepAttempts: Record<string, WorkflowStepAttemptState[]>
+): boolean =>
+  Object.values(stepAttempts).some((attempts) => attempts.at(-1)?.status === "failed");
+
+const sanitizeRecoveryDiagnostic = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const trimmed = message.trim();
+  if (trimmed === "") {
+    return "workflow run state could not be inspected";
+  }
+
+  return trimmed
+    .replaceAll(/"[^"]*(?:\/Users\/|\/home\/|\\Users\\)[^"]*"/g, '"<path>"')
+    .replaceAll(/(?:\/Users\/|\/home\/)[^\s)]+/g, "<path>")
+    .replaceAll(/[A-Za-z]:\\Users\\[^\s)]+/g, "<path>");
+};
 
 const validateJsonSerializableValue = (
   value: unknown,

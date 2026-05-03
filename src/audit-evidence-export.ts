@@ -242,6 +242,8 @@ const validateNeutralAuditEventForExport = (
   value: Record<string, unknown>,
   lineNumber: number
 ): NeutralAuditEvent => {
+  const boundaryMessage = `audit JSONL line ${lineNumber}: record is outside the audit export boundary`;
+
   if (
     typeof value.id !== "string" ||
     typeof value.type !== "string" ||
@@ -251,7 +253,23 @@ const validateNeutralAuditEventForExport = (
     !isRecord(value.run) ||
     typeof value.run.id !== "string"
   ) {
-    throw new Error(`audit JSONL line ${lineNumber}: record is outside the audit export boundary`);
+    throw new Error(boundaryMessage);
+  }
+
+  if (
+    value.step !== undefined &&
+    (!isRecord(value.step) ||
+      typeof value.step.id !== "string" ||
+      typeof value.step.attempt !== "number")
+  ) {
+    throw new Error(boundaryMessage);
+  }
+
+  if (
+    value.outcome !== undefined &&
+    (!isRecord(value.outcome) || typeof value.outcome.status !== "string")
+  ) {
+    throw new Error(boundaryMessage);
   }
 
   return value as unknown as NeutralAuditEvent;
@@ -383,12 +401,17 @@ const isPublicSafeEvidenceRef = (ref: AuditEvidenceExportEvidenceRef): boolean =
   return isSafeFileUri(ref.uri);
 };
 
-const isSafeRelativePath = (value: string): boolean =>
-  value.trim() !== "" &&
-  !value.startsWith("/") &&
-  !value.startsWith("\\") &&
-  !value.includes("://") &&
-  !value.split(/[\\/]+/u).includes("..");
+const isSafeRelativePath = (value: string): boolean => {
+  const trimmed = value.trim();
+  return (
+    trimmed !== "" &&
+    !trimmed.startsWith("/") &&
+    !trimmed.startsWith("\\") &&
+    !isWindowsDriveAbsolutePath(trimmed) &&
+    !trimmed.includes("://") &&
+    !trimmed.split(/[\\/]+/u).includes("..")
+  );
+};
 
 const isSafeFileUri = (value: string): boolean => {
   let parsed: URL;
@@ -398,7 +421,12 @@ const isSafeFileUri = (value: string): boolean => {
     return false;
   }
 
-  if (parsed.protocol !== "file:" || parsed.username !== "" || parsed.password !== "") {
+  if (
+    parsed.protocol !== "file:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.hostname !== ""
+  ) {
     return false;
   }
 
@@ -419,7 +447,11 @@ const containsCredentialShape = (value: string): boolean =>
 const containsWorkstationLocalPath = (value: string): boolean =>
   /(^|[/\\])Users[/\\][^/\\]+/u.test(value) ||
   /(^|[/\\])home[/\\][^/\\]+/u.test(value) ||
-  /^[A-Za-z]:[/\\]Users[/\\][^/\\]+/u.test(value);
+  isWindowsDriveAbsolutePath(value) ||
+  /(^|\/)[A-Za-z]:\//u.test(value);
+
+const isWindowsDriveAbsolutePath = (value: string): boolean =>
+  /^[A-Za-z]:[/\\]/u.test(value);
 
 const isStepTerminalEvent = (event: unknown): event is WorkflowStepAttemptEvent =>
   isRecord(event) &&

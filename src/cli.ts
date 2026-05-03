@@ -81,10 +81,11 @@ const runAuditEvidenceExportCommand = async (argv: string[]): Promise<number> =>
 const parseAuditEvidenceExportArgs = (
   argv: string[]
 ): { statePath: string; auditPath?: string; outputPath?: string } | undefined => {
-  const [statePath, maybeAuditPath, maybeOutputFlag, maybeOutputPath] = argv;
-  if (statePath === undefined) {
+  if (argv.length < 1 || argv.length > 4) {
     return undefined;
   }
+
+  const [statePath, maybeAuditPath, maybeOutputFlag, maybeOutputPath] = argv;
 
   if (maybeAuditPath === "--output") {
     if (maybeOutputFlag === undefined || maybeOutputPath !== undefined) {

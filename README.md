@@ -141,7 +141,10 @@ type, step attempts, neutral audit event summaries, and any public-safe
 context, idempotency key values, raw local state paths, raw audit paths,
 workstation-local evidence paths, secrets, customer data, production evidence
 locations, and unsupported Protocol Phase 4 evidence profile fields are not
-exported into the public-safe section.
+exported into the public-safe section. `file_uri` evidence references are
+omitted from public-safe exports until a later protocol evidence profile defines
+a deliberately public mapping; portable relative `local_path` references remain
+exportable.
 
 Workflow artifact hygiene is fail-closed at the local JSONL boundary and at
 public export boundaries. Raw secrets, token-shaped strings, private key blocks,

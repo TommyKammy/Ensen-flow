@@ -399,7 +399,7 @@ const isPublicSafeEvidenceRef = (ref: AuditEvidenceExportEvidenceRef): boolean =
     return isSafeRelativePath(ref.uri);
   }
 
-  return isSafeFileUri(ref.uri);
+  return isPublicSafeFileUri(ref.uri);
 };
 
 const isSafeRelativePath = (value: string): boolean => {
@@ -419,29 +419,9 @@ const createUnsafeEvidenceRefDiagnostic = (ref: AuditEvidenceExportEvidenceRef):
   return `omitted an evidence reference because its URI is not public-safe (category: ${category})`;
 };
 
-const isSafeFileUri = (value: string): boolean => {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return false;
-  }
-
-  if (
-    parsed.protocol !== "file:" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.hostname !== ""
-  ) {
-    return false;
-  }
-
-  if (parsed.search !== "" || parsed.hash !== "") {
-    return false;
-  }
-
-  return !parsed.pathname.split("/").includes("..");
-};
+const isPublicSafeFileUri = (_value: string): boolean =>
+  // Protocol Phase 4 has not defined a public evidence profile for file: URIs.
+  false;
 
 const isWindowsDriveAbsolutePath = (value: string): boolean =>
   /^[A-Za-z]:[/\\]/u.test(value);

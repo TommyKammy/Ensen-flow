@@ -11,6 +11,7 @@ import {
   runWorkflow
 } from "../src/index.js";
 import type {
+  ControlledPilotInputBoundary,
   HttpNotificationOutcome,
   HttpNotificationSubmitRequest,
   HttpNotificationTransportDelivery,
@@ -435,6 +436,75 @@ describe("HTTP notification connector skeleton", () => {
           "HTTP notification transport must declare a fake, local, or dry-run input boundary before controlled pilot use"
       }
     });
+  });
+
+  it("keeps notify unsupported for malformed real-input boundary metadata", async () => {
+    const connector = createHttpNotificationConnector({
+      transport: {
+        inputBoundary: {
+          mode: "real",
+          dryRunFirstEvidence: {
+            mode: "production",
+            reference: "docs/connector-capability-matrix.md"
+          },
+          override: {
+            approvedBy: "owner",
+            approvedAt: "not-an-iso-timestamp",
+            reason: "controlled owner pilot"
+          }
+        } as unknown as ControlledPilotInputBoundary,
+        deliver() {
+          return {
+            status: "succeeded",
+            summary: "custom transport accepted notification"
+          };
+        }
+      }
+    });
+
+    expect(connector.capabilities.notify).toEqual({
+      supported: false,
+      reason:
+        "HTTP notification transport real input requires explicit dry-run-first evidence and a human-controlled override"
+    });
+    await expect(connector.submit(notifyRequest)).resolves.toMatchObject({
+      ok: false,
+      connectorId: "http-notification",
+      operation: "submit",
+      error: {
+        code: "unsupported-operation",
+        retryable: false,
+        reason:
+          "HTTP notification transport real input requires explicit dry-run-first evidence and a human-controlled override"
+      }
+    });
+  });
+
+  it("supports notify for a valid real-input override boundary", () => {
+    const connector = createHttpNotificationConnector({
+      transport: {
+        inputBoundary: {
+          mode: "real",
+          dryRunFirstEvidence: {
+            mode: "dry-run",
+            reference: "docs/connector-capability-matrix.md"
+          },
+          override: {
+            approvedBy: "owner",
+            approvedAt: "2026-05-03T00:00:00.000Z",
+            reason: "controlled owner pilot"
+          }
+        },
+        deliver() {
+          return {
+            status: "succeeded",
+            summary: "custom transport accepted notification"
+          };
+        }
+      }
+    });
+
+    expect(connector.capabilities.notify).toEqual({ supported: true });
   });
 
   it("rejects invalid retry attempt values", async () => {

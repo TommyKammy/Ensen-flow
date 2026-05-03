@@ -89,4 +89,59 @@ describe("controlled pilot input boundary", () => {
       ).toBe(expectedReason);
     }
   });
+
+  it("rejects unknown input boundary modes instead of treating them as real input", () => {
+    expect(
+      explainControlledPilotBoundaryRejection({
+        surface: "HTTP notification transport",
+        boundary: malformedRealBoundary({
+          mode: "customer-live"
+        })
+      })
+    ).toBe(
+      "HTTP notification transport must declare a fake, local, dry-run, or explicitly approved real input boundary before controlled pilot use"
+    );
+  });
+
+  it("rejects malformed dry-run-first evidence modes for real input", () => {
+    expect(
+      explainControlledPilotBoundaryRejection({
+        surface: "HTTP notification transport",
+        boundary: malformedRealBoundary({
+          dryRunFirstEvidence: {
+            mode: "production",
+            reference: "docs/connector-capability-matrix.md"
+          }
+        })
+      })
+    ).toBe(
+      "HTTP notification transport real input requires explicit dry-run-first evidence and a human-controlled override"
+    );
+  });
+
+  it("rejects malformed real input approval timestamps", () => {
+    expect(
+      explainControlledPilotBoundaryRejection({
+        surface: "HTTP notification transport",
+        boundary: malformedRealBoundary({
+          override: {
+            approvedBy: "owner",
+            approvedAt: "2026-05-03 00:00:00",
+            reason: "controlled owner pilot"
+          }
+        })
+      })
+    ).toBe(
+      "HTTP notification transport real input requires explicit dry-run-first evidence and a human-controlled override"
+    );
+  });
+
+  it("allows real input only with dry-run-first evidence and a human override", () => {
+    expect(
+      explainControlledPilotBoundaryRejection({
+        surface: "HTTP notification transport",
+        boundary: malformedRealBoundary({})
+      })
+    ).toBeUndefined();
+  });
 });

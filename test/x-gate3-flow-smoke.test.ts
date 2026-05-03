@@ -45,7 +45,7 @@ describe("Flow X-Gate 3 caller smoke", () => {
       laneStatus: "blocked",
       loopStatus: "blocked",
       expectedRunStatus: "failed",
-      expectedAttemptStatus: "failed",
+      expectedAttemptStatus: "blocked",
       summary: "Loop X-Gate 3 local fake lane blocked."
     }
   ] as const)(

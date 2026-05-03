@@ -59,6 +59,17 @@ definition can name that a step requires an approval or notification action, but
 the schema does not bind that action to a provider, credential, channel, or
 runtime dispatch implementation.
 
+Approval recovery remains a runtime state boundary, not a schema-time provider
+binding. When a step handler returns an executor state such as
+`approval-required`, `blocked`, or `needs-review`, the local runner records a
+Flow-owned neutral recovery decision in JSONL run state and audit output.
+`approval-required` and `manual-repair-needed` stop automatic retry so a human
+can choose retry, re-run, abandon, or repair; `blocked` is recorded as a failed
+terminal run with the blocking decision preserved. The runner does not infer
+approval from Loop status, connector names, notification delivery, forwarded
+headers, or adjacent metadata. Changed replay input remains fail-closed before
+additional run or audit records are written.
+
 The HTTP notification connector skeleton keeps that boundary. A workflow may use
 `action.type: "notification"` with a placeholder `endpointAlias`, and focused
 tests may route that action through the local fake HTTP notification transport.

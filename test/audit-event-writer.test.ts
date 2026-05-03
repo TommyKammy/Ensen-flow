@@ -447,7 +447,7 @@ describe("neutral audit event writer", () => {
         outcome: { status: "complete" }
       } as unknown as CreateNeutralAuditEventInput)
     ).rejects.toThrow(
-      "audit event outcome.status must be succeeded, failed, canceled, or retryable-failed"
+      "audit event outcome.status must be succeeded, failed, canceled, retryable-failed, approval-required, blocked, or manual-repair-needed"
     );
   });
 

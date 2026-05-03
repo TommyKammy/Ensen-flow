@@ -18,7 +18,10 @@ const TERMINAL_STATES = new Set([
 const STEP_ATTEMPT_TERMINAL_STATUSES = new Set([
   "succeeded",
   "failed",
-  "retryable-failed"
+  "retryable-failed",
+  "approval-required",
+  "blocked",
+  "manual-repair-needed"
 ]);
 const EVENT_TYPES = new Set([
   "run.created",
@@ -42,13 +45,15 @@ const STEP_ATTEMPT_ALLOWED_KEYS = new Set([
   "attempt",
   "occurredAt",
   "retry",
-  "result"
+  "result",
+  "recovery"
 ]);
 const RUN_COMPLETED_ALLOWED_KEYS = new Set([
   "type",
   "runId",
   "terminalState",
-  "occurredAt"
+  "occurredAt",
+  "recovery"
 ]);
 const RETRY_METADATA_ALLOWED_KEYS = new Set([
   "retryable",
@@ -64,6 +69,25 @@ const TRIGGER_ALLOWED_KEYS = new Set([
 const IDEMPOTENCY_METADATA_ALLOWED_KEYS = new Set([
   "source",
   "key"
+]);
+const RECOVERY_DECISION_ALLOWED_KEYS = new Set([
+  "state",
+  "decision",
+  "reason"
+]);
+const RECOVERY_STATES = new Set([
+  "approval-required",
+  "retryable",
+  "blocked",
+  "abandoned",
+  "manual-repair-needed"
+]);
+const RECOVERY_DECISIONS = new Set([
+  "await-human-approval",
+  "retry-step",
+  "block-run",
+  "abandon-run",
+  "manual-repair-needed"
 ]);
 const statePathAppendLocks = new Map<string, Promise<void>>();
 
@@ -93,6 +117,26 @@ export interface WorkflowRunRetryMetadata {
   reason?: string;
 }
 
+export type WorkflowRunRecoveryState =
+  | "approval-required"
+  | "retryable"
+  | "blocked"
+  | "abandoned"
+  | "manual-repair-needed";
+
+export type WorkflowRunRecoveryDecision =
+  | "await-human-approval"
+  | "retry-step"
+  | "block-run"
+  | "abandon-run"
+  | "manual-repair-needed";
+
+export interface WorkflowRunRecoveryDecisionMetadata {
+  state: WorkflowRunRecoveryState;
+  decision: WorkflowRunRecoveryDecision;
+  reason: string;
+}
+
 export interface CreateWorkflowRunInput {
   runId: string;
   workflowId: string;
@@ -118,6 +162,7 @@ export interface WorkflowStepAttemptEvent {
   occurredAt: string;
   retry?: WorkflowRunRetryMetadata;
   result?: WorkflowStepAttemptResultMetadata;
+  recovery?: WorkflowRunRecoveryDecisionMetadata;
 }
 
 export interface WorkflowRunCompletedEvent {
@@ -125,6 +170,7 @@ export interface WorkflowRunCompletedEvent {
   runId: string;
   terminalState: WorkflowRunTerminalState;
   occurredAt: string;
+  recovery?: WorkflowRunRecoveryDecisionMetadata;
 }
 
 export type WorkflowRunEvent =
@@ -154,7 +200,15 @@ export interface WorkflowStepAttemptState {
   failedAt?: string;
   retry?: WorkflowRunRetryMetadata;
   result?: WorkflowStepAttemptResultMetadata;
-  status: "running" | "succeeded" | "failed" | "retryable-failed";
+  recovery?: WorkflowRunRecoveryDecisionMetadata;
+  status:
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "retryable-failed"
+    | "approval-required"
+    | "blocked"
+    | "manual-repair-needed";
 }
 
 export interface WorkflowRunState {
@@ -168,6 +222,8 @@ export type WorkflowStepAttemptResultMetadata = Record<string, unknown>;
 export type WorkflowRunRecoveryClassification =
   | "recoverable"
   | "terminal"
+  | "approval-required"
+  | "blocked"
   | "corrupt"
   | "manual-repair-needed";
 
@@ -329,6 +385,30 @@ export const inspectWorkflowRunRecovery = async (
       run,
       eventCount: state.events.length,
       activeStepAttempts
+    };
+  }
+
+  if (hasLatestStepStatus(state.stepAttempts, "approval-required")) {
+    return {
+      classification: "approval-required",
+      action: "operator-review-required",
+      diagnostic:
+        "workflow run has approval-required step attempts; human approval is required before retry, re-run, abandon, or manual repair",
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length
+    };
+  }
+
+  if (hasLatestStepStatus(state.stepAttempts, "blocked")) {
+    return {
+      classification: "blocked",
+      action: "operator-review-required",
+      diagnostic:
+        "workflow run has blocked step attempts; operator review is required before retry, re-run, abandon, or manual repair",
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length
     };
   }
 
@@ -532,12 +612,32 @@ const applyStepAttemptEvent = (
     attempt.status = "succeeded";
     attempt.retry = event.retry;
     attempt.result = event.result;
+    attempt.recovery = event.recovery;
   } else {
     attempt.failedAt = event.occurredAt;
-    attempt.status = event.retry?.retryable === true ? "retryable-failed" : "failed";
+    attempt.status = stepAttemptStatusFromFailedEvent(event);
     attempt.retry = event.retry;
     attempt.result = event.result;
+    attempt.recovery = event.recovery;
   }
+};
+
+const stepAttemptStatusFromFailedEvent = (
+  event: WorkflowStepAttemptEvent
+): WorkflowStepAttemptState["status"] => {
+  if (event.recovery?.state === "approval-required") {
+    return "approval-required";
+  }
+
+  if (event.recovery?.state === "blocked") {
+    return "blocked";
+  }
+
+  if (event.recovery?.state === "manual-repair-needed") {
+    return "manual-repair-needed";
+  }
+
+  return event.retry?.retryable === true ? "retryable-failed" : "failed";
 };
 
 const validateWorkflowRunEvent = (
@@ -578,6 +678,10 @@ const validateWorkflowRunEvent = (
       );
     }
 
+    if ("recovery" in value) {
+      validateRecoveryDecisionMetadata(value.recovery, lineNumber);
+    }
+
     return value as unknown as WorkflowRunCompletedEvent;
   }
 
@@ -596,6 +700,10 @@ const validateWorkflowRunEvent = (
       throw stateError(lineNumber, "result is only allowed on terminal step attempt events");
     }
     validateResultMetadata(value.result, lineNumber);
+  }
+
+  if ("recovery" in value) {
+    validateRecoveryDecisionMetadata(value.recovery, lineNumber);
   }
 
   return value as unknown as WorkflowStepAttemptEvent;
@@ -664,6 +772,30 @@ const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
   if ("reason" in value) {
     rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "retry.reason");
   }
+};
+
+const validateRecoveryDecisionMetadata = (value: unknown, lineNumber: number): void => {
+  if (!isRecord(value)) {
+    throw stateError(lineNumber, "recovery must be an object");
+  }
+
+  rejectUnknownKeys(value, RECOVERY_DECISION_ALLOWED_KEYS, lineNumber);
+  if (typeof value.state !== "string" || !RECOVERY_STATES.has(value.state)) {
+    throw stateError(
+      lineNumber,
+      "recovery.state must be approval-required, retryable, blocked, abandoned, or manual-repair-needed"
+    );
+  }
+
+  if (typeof value.decision !== "string" || !RECOVERY_DECISIONS.has(value.decision)) {
+    throw stateError(
+      lineNumber,
+      "recovery.decision must be await-human-approval, retry-step, block-run, abandon-run, or manual-repair-needed"
+    );
+  }
+
+  requireNonEmptyString(value, "reason", lineNumber);
+  rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "recovery.reason");
 };
 
 const validateResultMetadata = (value: unknown, lineNumber: number): void => {
@@ -780,7 +912,14 @@ const summarizeActiveStepAttempts = (
 const hasFailedNonTerminalStepAttempt = (
   stepAttempts: Record<string, WorkflowStepAttemptState[]>
 ): boolean =>
-  Object.values(stepAttempts).some((attempts) => attempts.at(-1)?.status === "failed");
+  Object.values(stepAttempts).some((attempts) =>
+    ["failed", "manual-repair-needed"].includes(attempts.at(-1)?.status ?? "")
+  );
+
+const hasLatestStepStatus = (
+  stepAttempts: Record<string, WorkflowStepAttemptState[]>,
+  status: WorkflowStepAttemptState["status"]
+): boolean => Object.values(stepAttempts).some((attempts) => attempts.at(-1)?.status === status);
 
 const sanitizeRecoveryDiagnostic = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);

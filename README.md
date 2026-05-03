@@ -92,14 +92,26 @@ metadata, timestamps, and explicit terminal states while remaining independent
 from Ensen-loop and external connector contracts.
 
 Recovery uses the same Flow-owned JSONL boundary. `inspectWorkflowRunRecovery`
-classifies an existing state file as `recoverable`, `terminal`, `corrupt`, or
-`manual-repair-needed` without mutating the file, and returns an explainable
-diagnostic instead of trusting connector-specific authority. `runWorkflow` can
-continue a projected non-terminal local run only when completed steps and
-retryable attempts make the next step unambiguous; active or contradictory
-attempt state fails closed for operator review. `stopWorkflowRunRecovery`
-performs an explicit safe stop by appending a `canceled` terminal event, never by
-deleting or rewriting prior run evidence.
+classifies an existing state file as `recoverable`, `terminal`,
+`approval-required`, `blocked`, `corrupt`, or `manual-repair-needed` without
+mutating the file, and returns an explainable diagnostic instead of trusting
+connector-specific authority. `runWorkflow` can continue a projected
+non-terminal local run only when completed steps and retryable attempts make the
+next step unambiguous; active or contradictory attempt state fails closed for
+operator review. `stopWorkflowRunRecovery` performs an explicit safe stop by
+appending a `canceled` terminal event, never by deleting or rewriting prior run
+evidence.
+
+Approval recovery is also Flow-owned and human-controlled. Executor outcomes
+such as `approval-required`, `blocked`, and `needs-review` are recorded as
+neutral step recovery decisions instead of being inferred from Loop state,
+connector names, or notification delivery. `approval-required` and
+`manual-repair-needed` runs stay non-terminal until an operator chooses retry,
+re-run, abandon, or repair; `blocked` records a failed terminal run with the
+blocking decision preserved. Retryable technical failures keep using retry
+metadata and idempotency keys, while changed replay input fails closed before
+new state or audit records are appended. These records are audit-friendly local
+recovery facts, not compliance evidence.
 
 ## Neutral Audit JSONL Events
 

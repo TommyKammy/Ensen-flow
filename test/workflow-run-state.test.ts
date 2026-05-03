@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   appendWorkflowRunEvent,
   createWorkflowRun,
-  readWorkflowRunState
+  inspectWorkflowRunRecovery,
+  readWorkflowRunState,
+  stopWorkflowRunRecovery
 } from "../src/index.js";
 
 const tempRoots: string[] = [];
@@ -27,6 +29,233 @@ afterEach(async () => {
 });
 
 describe("workflow run JSONL state", () => {
+  it("classifies an existing terminal run as recovery-terminal without replaying work", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-terminal-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "run-terminal-001",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+
+    const contentsBeforeRecovery = await readFile(statePath, "utf8");
+
+    await expect(inspectWorkflowRunRecovery(statePath)).resolves.toMatchObject({
+      classification: "terminal",
+      action: "do-not-replay",
+      historyPreserved: true,
+      run: {
+        runId: "run-terminal-001",
+        workflowId: "operator-review",
+        status: "succeeded",
+        terminalState: "succeeded"
+      },
+      eventCount: 2
+    });
+    await expect(readFile(statePath, "utf8")).resolves.toBe(contentsBeforeRecovery);
+  });
+
+  it("classifies corrupt JSONL as fail-closed recovery-corrupt with a sanitized diagnostic", async () => {
+    const statePath = await createTempStatePath();
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: "run-corrupt-001",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: { type: "manual", receivedAt: "2026-04-29T00:00:00.000Z" },
+          occurredAt: "2026-04-29T00:00:01.000Z"
+        }),
+        "{not-json"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const report = await inspectWorkflowRunRecovery(statePath);
+
+    expect(report).toMatchObject({
+      classification: "corrupt",
+      action: "repair-jsonl-before-recovery",
+      historyPreserved: true
+    });
+    expect(report.diagnostic).toContain("workflow run state line 2: invalid JSON");
+    expect(report.diagnostic).not.toContain(tmpdir());
+  });
+
+  it("classifies active step attempts as manual-repair-needed before recovery", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-active-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-active-001",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+
+    await expect(inspectWorkflowRunRecovery(statePath)).resolves.toMatchObject({
+      classification: "manual-repair-needed",
+      action: "operator-review-required",
+      historyPreserved: true,
+      run: {
+        runId: "run-active-001",
+        status: "running"
+      },
+      activeStepAttempts: [
+        {
+          stepId: "collect-input",
+          attempt: 1,
+          status: "running",
+          startedAt: "2026-04-29T00:00:02.000Z"
+        }
+      ]
+    });
+  });
+
+  it("safely stops a non-terminal JSONL run by appending canceled without deleting history", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-stop-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-stop-001",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    const contentsBeforeStop = await readFile(statePath, "utf8");
+
+    const report = await stopWorkflowRunRecovery({
+      statePath,
+      runId: "run-stop-001",
+      stoppedAt: "2026-04-29T00:00:03.000Z"
+    });
+
+    expect(report).toMatchObject({
+      classification: "terminal",
+      action: "do-not-replay",
+      historyPreserved: true,
+      run: {
+        runId: "run-stop-001",
+        status: "canceled",
+        terminalState: "canceled"
+      },
+      eventCount: 3
+    });
+    await expect(readFile(statePath, "utf8")).resolves.toBe(
+      `${contentsBeforeStop}${JSON.stringify({
+        type: "run.completed",
+        runId: "run-stop-001",
+        terminalState: "canceled",
+        occurredAt: "2026-04-29T00:00:03.000Z"
+      })}\n`
+    );
+  });
+
+  it("classifies failed non-terminal step attempts as manual-repair-needed", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-failed-open-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "run-failed-open-001",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.failed",
+      runId: "run-failed-open-001",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      retry: {
+        retryable: false,
+        reason: "manual input rejected"
+      }
+    });
+
+    await expect(inspectWorkflowRunRecovery(statePath)).resolves.toMatchObject({
+      classification: "manual-repair-needed",
+      action: "operator-review-required",
+      historyPreserved: true,
+      run: {
+        runId: "run-failed-open-001",
+        status: "running"
+      },
+      eventCount: 3
+    });
+  });
+
+  it("classifies non-terminal state without active attempts as recoverable", async () => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-recoverable-001",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await expect(inspectWorkflowRunRecovery(statePath)).resolves.toMatchObject({
+      classification: "recoverable",
+      action: "resume-from-projected-state",
+      historyPreserved: true,
+      run: {
+        runId: "run-recoverable-001",
+        status: "created"
+      },
+      eventCount: 1
+    });
+  });
+
   it("persists and reads workflow run events in append order", async () => {
     const statePath = await createTempStatePath();
 

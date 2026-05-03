@@ -89,6 +89,16 @@ The model records trigger context, idempotency metadata, step attempts, retry
 metadata, timestamps, and explicit terminal states while remaining independent
 from Ensen-loop and external connector contracts.
 
+Recovery uses the same Flow-owned JSONL boundary. `inspectWorkflowRunRecovery`
+classifies an existing state file as `recoverable`, `terminal`, `corrupt`, or
+`manual-repair-needed` without mutating the file, and returns an explainable
+diagnostic instead of trusting connector-specific authority. `runWorkflow` can
+continue a projected non-terminal local run only when completed steps and
+retryable attempts make the next step unambiguous; active or contradictory
+attempt state fails closed for operator review. `stopWorkflowRunRecovery`
+performs an explicit safe stop by appending a `canceled` terminal event, never by
+deleting or rewriting prior run evidence.
+
 ## Neutral Audit JSONL Events
 
 The local runner can also write append-only JSONL audit events when callers pass

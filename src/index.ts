@@ -153,7 +153,9 @@ export type { EipVersionBoundary } from "./eip-version.js";
 export {
   appendWorkflowRunEvent,
   createWorkflowRun,
-  readWorkflowRunState
+  inspectWorkflowRunRecovery,
+  readWorkflowRunState,
+  stopWorkflowRunRecovery
 } from "./workflow-run-state.js";
 
 export { createLocalAuditEventWriter } from "./audit-event-writer.js";
@@ -164,12 +166,18 @@ export type {
   WorkflowRunCreatedEvent,
   WorkflowRunEvent,
   WorkflowRunIdempotencyMetadata,
+  WorkflowRunRecoveryAction,
+  WorkflowRunRecoveryClassification,
+  WorkflowRunRecoveryReport,
+  WorkflowRunRecoveryRunSummary,
+  WorkflowRunRecoveryStepAttemptSummary,
   WorkflowRunRecord,
   WorkflowRunRetryMetadata,
   WorkflowRunState,
   WorkflowRunStatus,
   WorkflowRunTerminalState,
   WorkflowRunTriggerContext,
+  StopWorkflowRunRecoveryInput,
   WorkflowStepAttemptEvent,
   WorkflowStepAttemptResultMetadata,
   WorkflowStepAttemptState

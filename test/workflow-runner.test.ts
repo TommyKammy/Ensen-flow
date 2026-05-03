@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readWorkflowRunState, runWorkflow } from "../src/index.js";
+import {
+  appendWorkflowRunEvent,
+  createWorkflowRun,
+  readWorkflowRunState,
+  runWorkflow
+} from "../src/index.js";
 import type {
   ExecutorConnectorStatusSnapshot,
   WorkflowDefinition
@@ -43,6 +48,84 @@ afterEach(async () => {
 });
 
 describe("sequential workflow runner", () => {
+  it("recovers a non-terminal JSONL run state from the next incomplete step", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const statePath = await createTempStatePath();
+    const calls: string[] = [];
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-manual-recover",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:06:00.000Z",
+        context: {
+          requestId: "manual-recover"
+        },
+        idempotencyKey: {
+          source: "input",
+          key: "manual-recover"
+        }
+      },
+      createdAt: "2026-04-29T00:06:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-manual-recover",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:06:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-manual-recover",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:06:03.000Z"
+    });
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-recover"
+      },
+      now: (() => {
+        let index = 0;
+        const timestamps = [
+          "2026-04-29T00:06:04.000Z",
+          "2026-04-29T00:06:05.000Z",
+          "2026-04-29T00:06:06.000Z"
+        ];
+        return () => timestamps[index++] ?? "2026-04-29T00:06:07.000Z";
+      })(),
+      stepHandler: ({ step }) => {
+        calls.push(step.id);
+      }
+    });
+
+    expect(calls).toEqual(["notify-operator"]);
+    expect(result.run.status).toBe("succeeded");
+    expect(result.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "run.completed"
+    ]);
+    expect(result.stepAttempts["collect-input"]).toHaveLength(1);
+    expect(result.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        attempt: 1,
+        startedAt: "2026-04-29T00:06:04.000Z",
+        completedAt: "2026-04-29T00:06:05.000Z",
+        status: "succeeded"
+      }
+    ]);
+  });
+
   it("emits deterministic neutral audit events for a successful run", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();

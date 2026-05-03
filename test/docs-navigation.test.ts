@@ -60,7 +60,7 @@ describe("documentation navigation", () => {
 
     for (const requiredText of [
       "Flow-side X-Gate 3 Track A contribution is complete",
-      "03d4175b11fd5cd888b04ceb865453933da885ac",
+      "a547a4373e3f975625c4086e786bf663811b2b24",
       "#82",
       "#88",
       "#96",
@@ -68,6 +68,8 @@ describe("documentation navigation", () => {
       "#101",
       "#102",
       "#103",
+      "#104",
+      "#108",
       "Ensen-protocol issue #50",
       "Ensen-protocol PR #51",
       "v0.3.0",

@@ -1,12 +1,12 @@
 # X-Gate 3 Track A Flow Closure Review
 
-Updated: 2026-05-03
+Updated: 2026-05-04
 
 ## Conclusion
 
 Flow-side X-Gate 3 Track A contribution is complete at Flow commit
-`03d4175b11fd5cd888b04ceb865453933da885ac` (`03d4175`), merged by PR
-`#107`. This is a Flow-side closure only. Overall X-Gate 3 Track A remains
+`a547a4373e3f975625c4086e786bf663811b2b24` (`a547a43`), merged by PR
+`#108`. This is a Flow-side closure only. Overall X-Gate 3 Track A remains
 blocked by non-Flow Loop Track A work until the Loop-owned allowlist,
 dry-run-first/human merge, artifact hygiene, and rollback/cleanup rows are
 verified complete.
@@ -33,6 +33,7 @@ Overall X-Gate 3 Track A remains blocked by non-Flow Loop Track A work.
 | Protocol `v0.3.0` evidence profile snapshot adoption | #101 | #105 | Closed and merged into `main`. |
 | Audit/evidence export alignment with Protocol profile | #102 | #106 | Closed and merged into `main`. |
 | Evidence profile conformance and hygiene checks | #103 | #107 | Closed and merged into `main` at `03d4175`. |
+| Flow-side X-Gate 3 Track A closure sync | #104 | #108 | Closed and merged into `main` at `a547a43`. |
 
 Protocol closure evidence:
 

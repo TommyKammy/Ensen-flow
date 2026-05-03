@@ -6,7 +6,7 @@ Updated: 2026-05-03
 
 Flow-side X-Gate 3 Track A contribution is complete at Flow commit
 `03d4175b11fd5cd888b04ceb865453933da885ac` (`03d4175`), merged by PR
-#107. This is a Flow-side closure only. Overall X-Gate 3 Track A remains
+`#107`. This is a Flow-side closure only. Overall X-Gate 3 Track A remains
 blocked by non-Flow Loop Track A work until the Loop-owned allowlist,
 dry-run-first/human merge, artifact hygiene, and rollback/cleanup rows are
 verified complete.

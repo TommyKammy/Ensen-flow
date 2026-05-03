@@ -1,18 +1,41 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 
-import { loadWorkflowDefinitionFile, runWorkflow } from "./index.js";
+import {
+  createAuditEvidenceExport,
+  loadWorkflowDefinitionFile,
+  runWorkflow
+} from "./index.js";
 
 const printUsage = (): void => {
   console.error(
-    "Usage: node dist/cli.js run <workflow-definition.json> <state.jsonl> [trigger-context-json]"
+    [
+      "Usage:",
+      "  node dist/cli.js run <workflow-definition.json> <state.jsonl> [trigger-context-json]",
+      "  node dist/cli.js export-audit-evidence <state.jsonl> [audit.jsonl] [--output <export.json>]"
+    ].join("\n")
   );
 };
 
 export const runCli = async (argv: string[]): Promise<number> => {
-  const [command, definitionPath, statePath, triggerContextJson] = argv;
+  const [command] = argv;
 
-  if (command !== "run" || definitionPath === undefined || statePath === undefined) {
+  if (command === "run") {
+    return runWorkflowCommand(argv.slice(1));
+  }
+
+  if (command === "export-audit-evidence") {
+    return runAuditEvidenceExportCommand(argv.slice(1));
+  }
+
+  printUsage();
+  return 2;
+};
+
+const runWorkflowCommand = async (argv: string[]): Promise<number> => {
+  const [definitionPath, statePath, triggerContextJson] = argv;
+
+  if (definitionPath === undefined || statePath === undefined) {
     printUsage();
     return 2;
   }
@@ -40,6 +63,57 @@ export const runCli = async (argv: string[]): Promise<number> => {
   );
 
   return 0;
+};
+
+const runAuditEvidenceExportCommand = async (argv: string[]): Promise<number> => {
+  const parsed = parseAuditEvidenceExportArgs(argv);
+  if (parsed === undefined) {
+    printUsage();
+    return 2;
+  }
+
+  const exportArtifact = await createAuditEvidenceExport(parsed);
+  console.log(JSON.stringify(exportArtifact, null, 2));
+
+  return 0;
+};
+
+const parseAuditEvidenceExportArgs = (
+  argv: string[]
+): { statePath: string; auditPath?: string; outputPath?: string } | undefined => {
+  if (argv.length < 1 || argv.length > 4) {
+    return undefined;
+  }
+
+  const [statePath, maybeAuditPath, maybeOutputFlag, maybeOutputPath] = argv;
+
+  if (maybeAuditPath === "--output") {
+    if (maybeOutputFlag === undefined || maybeOutputPath !== undefined) {
+      return undefined;
+    }
+
+    return {
+      statePath,
+      outputPath: maybeOutputFlag
+    };
+  }
+
+  if (maybeOutputFlag === undefined) {
+    return {
+      statePath,
+      ...(maybeAuditPath === undefined ? {} : { auditPath: maybeAuditPath })
+    };
+  }
+
+  if (maybeOutputFlag !== "--output" || maybeOutputPath === undefined) {
+    return undefined;
+  }
+
+  return {
+    statePath,
+    ...(maybeAuditPath === undefined ? {} : { auditPath: maybeAuditPath }),
+    outputPath: maybeOutputPath
+  };
 };
 
 const parseTriggerContext = (

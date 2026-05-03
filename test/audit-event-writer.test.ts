@@ -1,10 +1,16 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createLocalAuditEventWriter } from "../src/index.js";
+import { runCli } from "../src/cli.js";
+import {
+  appendWorkflowRunEvent,
+  createAuditEvidenceExport,
+  createLocalAuditEventWriter,
+  createWorkflowRun
+} from "../src/index.js";
 import type { CreateNeutralAuditEventInput } from "../src/index.js";
 
 const tempRoots: string[] = [];
@@ -27,6 +33,309 @@ afterEach(async () => {
 });
 
 describe("neutral audit event writer", () => {
+  it("exports public-safe audit and evidence metadata without raw local paths or trigger context", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, auditRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+    const auditPath = join(auditRoot, "audit", "manual-run.audit.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {
+          requestId: "private-request-id",
+          customerName: "private-customer"
+        },
+        idempotencyKey: {
+          source: "input",
+          key: "private-idempotency-key"
+        }
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        evidenceBundleRef: {
+          schemaVersion: "eip.evidence-bundle-ref.v1",
+          id: "evb_manual_export",
+          correlationId: "corr_manual_export",
+          type: "local_path",
+          uri: "artifacts/evidence/manual-export/bundle.json",
+          createdAt: "2026-04-29T00:00:03.000Z"
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "local-manual-demo-export",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+      run: { id: "local-manual-demo-export" }
+    });
+    await writer.write({
+      type: "workflow.completed",
+      occurredAt: "2026-04-29T00:00:04.000Z",
+      outcome: { status: "succeeded" }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath, auditPath });
+    const serialized = JSON.stringify(exported);
+
+    expect(exported).toMatchObject({
+      schemaVersion: "flow.audit-evidence-export.v1",
+      boundary: {
+        productionEvidenceReady: false,
+        protocolEvidenceProfile: "pending-protocol-phase-4"
+      },
+      publicSafe: {
+        run: {
+          runId: "local-manual-demo-export",
+          workflowId: "local-manual-demo",
+          status: "succeeded",
+          terminalState: "succeeded"
+        },
+        trigger: {
+          type: "manual",
+          contextExported: false,
+          idempotencyKey: {
+            source: "input",
+            keyExported: false
+          }
+        },
+        evidenceRefs: [
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_manual_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/manual-export/bundle.json"
+          }
+        ],
+        auditEvents: [
+          {
+            id: "audit.local-manual-demo-export.000001",
+            type: "workflow.completed"
+          }
+        ]
+      },
+      localConfidentialReferences: {
+        statePath: {
+          classification: "local-confidential-reference",
+          value: "<local-workflow-run-state-jsonl>"
+        },
+        auditPath: {
+          classification: "local-confidential-reference",
+          value: "<local-audit-jsonl>"
+        }
+      }
+    });
+    expect(serialized).not.toContain(statePath);
+    expect(serialized).not.toContain(auditPath);
+    expect(serialized).not.toContain("private-customer");
+    expect(serialized).not.toContain("private-request-id");
+    expect(serialized).not.toContain("private-idempotency-key");
+  });
+
+  it("rejects malformed optional audit event export fields before summarizing", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, auditRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+    const auditPath = join(auditRoot, "audit", "manual-run.audit.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    await mkdir(dirname(auditPath), { recursive: true });
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        id: "audit.local-manual-demo-export.000001",
+        type: "step.completed",
+        occurredAt: "2026-04-29T00:00:02.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+        run: { id: "local-manual-demo-export" },
+        step: null
+      })}\n`,
+      "utf8"
+    );
+
+    await expect(createAuditEvidenceExport({ statePath, auditPath })).rejects.toThrow(
+      "audit event export failed: audit JSONL line 1: record is outside the audit export boundary"
+    );
+
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        id: "audit.local-manual-demo-export.000001",
+        type: "workflow.completed",
+        occurredAt: "2026-04-29T00:00:02.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+        run: { id: "local-manual-demo-export" },
+        outcome: null
+      })}\n`,
+      "utf8"
+    );
+
+    await expect(createAuditEvidenceExport({ statePath, auditPath })).rejects.toThrow(
+      "audit event export failed: audit JSONL line 1: record is outside the audit export boundary"
+    );
+  });
+
+  it("omits Windows-style local evidence paths from public-safe exports", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+    const windowsDrivePath = ["C:", "tmp", "bundle.json"].join("\\");
+    const windowsNetworkPath = ["", "", "server", "share", "bundle.json"].join("\\");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        evidenceRefs: [
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_public_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/public/bundle.json",
+            createdAt: "2026-04-29T00:00:02.000Z"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_windows_drive_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: windowsDrivePath,
+            createdAt: "2026-04-29T00:00:02.000Z"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_windows_network_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: windowsNetworkPath,
+            createdAt: "2026-04-29T00:00:02.000Z"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_windows_file_uri_export",
+            correlationId: "corr_manual_export",
+            type: "file_uri",
+            uri: "file:///C:/tmp/bundle.json",
+            createdAt: "2026-04-29T00:00:02.000Z"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_windows_network_file_uri_export",
+            correlationId: "corr_manual_export",
+            type: "file_uri",
+            uri: "file://server/share/bundle.json",
+            createdAt: "2026-04-29T00:00:02.000Z"
+          }
+        ]
+      }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.evidenceRefs.map((ref) => ref.uri)).toEqual([
+      "artifacts/evidence/public/bundle.json"
+    ]);
+    expect(exported.publicSafe.diagnostics).toEqual([
+      "omitted an evidence reference because its URI is not public-safe",
+      "omitted an evidence reference because its URI is not public-safe",
+      "omitted an evidence reference because its URI is not public-safe",
+      "omitted an evidence reference because its URI is not public-safe"
+    ]);
+    expect(JSON.stringify(exported)).not.toContain(windowsDrivePath);
+    expect(JSON.stringify(exported)).not.toContain(windowsNetworkPath);
+  });
+
+  it("rejects extra export-audit-evidence CLI arguments", async () => {
+    const originalError = console.error;
+    const errors: string[] = [];
+    console.error = (message?: unknown): void => {
+      errors.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "export-audit-evidence",
+          "state.jsonl",
+          "audit.jsonl",
+          "--output",
+          "export.json",
+          "extra"
+        ])
+      ).resolves.toBe(2);
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors.join("\n")).toContain(
+      "node dist/cli.js export-audit-evidence <state.jsonl> [audit.jsonl] [--output <export.json>]"
+    );
+  });
+
   it("freezes constructor context snapshots before later caller mutation", async () => {
     const auditPath = await createTempAuditPath();
     const workflow = { id: "trusted-workflow", version: "flow.workflow.v1" };

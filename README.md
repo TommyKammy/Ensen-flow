@@ -9,9 +9,11 @@ minimal TypeScript scaffold plus the initial standalone workflow definition
 schema, append-only JSONL workflow run state helpers, a local sequential runner,
 neutral audit JSONL events, a bounded local schedule trigger evaluator, and a
 bounded local webhook intake helper, and a bounded local file connector
-skeleton for fixture read/write actions. It
-does not implement executor connectors, Ensen-loop integration, ERPNext
-behavior, or Pharma/GxP workflow packs yet.
+skeleton for fixture read/write actions. It also exposes a local audit and
+evidence metadata export skeleton for JSONL run state. It does not implement
+production evidence archives, compliance bundles, customer data exports,
+executor connectors, Ensen-loop integration, ERPNext behavior, or Pharma/GxP
+workflow packs yet.
 
 Use the same commands locally that CI runs:
 
@@ -107,6 +109,22 @@ shape for workflow start, step start, step completion, step failure, retry
 scheduling, and workflow completion or failure. Each record includes a stable
 event ID, timestamp, actor and source context, workflow and run references, and
 step references where applicable.
+
+The built CLI can export public-safe audit and evidence metadata from local run
+state after `npm run build`:
+
+```sh
+node dist/cli.js export-audit-evidence <state-jsonl-path> [audit-jsonl-path] [--output <export-json-path>]
+```
+
+The export intentionally separates `publicSafe` metadata from
+`localConfidentialReferences`. Public-safe fields summarize run status, trigger
+type, step attempts, neutral audit event summaries, and any public-safe
+`eip.evidence-bundle-ref.v1` references found in step result metadata. Trigger
+context, idempotency key values, raw local state paths, raw audit paths,
+workstation-local evidence paths, secrets, customer data, production evidence
+locations, and unsupported Protocol Phase 4 evidence profile fields are not
+exported into the public-safe section.
 
 This internal shape is intended to support a later mapping to EIP AuditEvent,
 but it does not claim EIP conformance and does not import Ensen-protocol runtime

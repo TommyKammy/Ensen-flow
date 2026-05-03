@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createLocalAuditEventWriter } from "../src/index.js";
+import {
+  appendWorkflowRunEvent,
+  createAuditEvidenceExport,
+  createLocalAuditEventWriter,
+  createWorkflowRun
+} from "../src/index.js";
 import type { CreateNeutralAuditEventInput } from "../src/index.js";
 
 const tempRoots: string[] = [];
@@ -27,6 +32,131 @@ afterEach(async () => {
 });
 
 describe("neutral audit event writer", () => {
+  it("exports public-safe audit and evidence metadata without raw local paths or trigger context", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, auditRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+    const auditPath = join(auditRoot, "audit", "manual-run.audit.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {
+          requestId: "private-request-id",
+          customerName: "private-customer"
+        },
+        idempotencyKey: {
+          source: "input",
+          key: "private-idempotency-key"
+        }
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        evidenceBundleRef: {
+          schemaVersion: "eip.evidence-bundle-ref.v1",
+          id: "evb_manual_export",
+          correlationId: "corr_manual_export",
+          type: "local_path",
+          uri: "artifacts/evidence/manual-export/bundle.json",
+          createdAt: "2026-04-29T00:00:03.000Z"
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "local-manual-demo-export",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+      run: { id: "local-manual-demo-export" }
+    });
+    await writer.write({
+      type: "workflow.completed",
+      occurredAt: "2026-04-29T00:00:04.000Z",
+      outcome: { status: "succeeded" }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath, auditPath });
+    const serialized = JSON.stringify(exported);
+
+    expect(exported).toMatchObject({
+      schemaVersion: "flow.audit-evidence-export.v1",
+      boundary: {
+        productionEvidenceReady: false,
+        protocolEvidenceProfile: "pending-protocol-phase-4"
+      },
+      publicSafe: {
+        run: {
+          runId: "local-manual-demo-export",
+          workflowId: "local-manual-demo",
+          status: "succeeded",
+          terminalState: "succeeded"
+        },
+        trigger: {
+          type: "manual",
+          contextExported: false,
+          idempotencyKey: {
+            source: "input",
+            keyExported: false
+          }
+        },
+        evidenceRefs: [
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_manual_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/manual-export/bundle.json"
+          }
+        ],
+        auditEvents: [
+          {
+            id: "audit.local-manual-demo-export.000001",
+            type: "workflow.completed"
+          }
+        ]
+      },
+      localConfidentialReferences: {
+        statePath: {
+          classification: "local-confidential-reference",
+          value: "<local-workflow-run-state-jsonl>"
+        },
+        auditPath: {
+          classification: "local-confidential-reference",
+          value: "<local-audit-jsonl>"
+        }
+      }
+    });
+    expect(serialized).not.toContain(statePath);
+    expect(serialized).not.toContain(auditPath);
+    expect(serialized).not.toContain("private-customer");
+    expect(serialized).not.toContain("private-request-id");
+    expect(serialized).not.toContain("private-idempotency-key");
+  });
+
   it("freezes constructor context snapshots before later caller mutation", async () => {
     const auditPath = await createTempAuditPath();
     const workflow = { id: "trusted-workflow", version: "flow.workflow.v1" };

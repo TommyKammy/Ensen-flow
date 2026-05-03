@@ -160,6 +160,20 @@ export {
 
 export { createLocalAuditEventWriter } from "./audit-event-writer.js";
 
+export { createAuditEvidenceExport } from "./audit-evidence-export.js";
+
+export type {
+  AuditEvidenceExport,
+  AuditEvidenceExportAuditEventSummary,
+  AuditEvidenceExportBoundary,
+  AuditEvidenceExportEvidenceRef,
+  AuditEvidenceExportLocalConfidentialReferences,
+  AuditEvidenceExportLocalReference,
+  AuditEvidenceExportPublicSafe,
+  AuditEvidenceExportStepSummary,
+  CreateAuditEvidenceExportInput
+} from "./audit-evidence-export.js";
+
 export type {
   AppendableWorkflowRunEvent,
   CreateWorkflowRunInput,

@@ -463,7 +463,7 @@ export const stopWorkflowRunRecovery = async (
     throw new Error("cannot stop workflow run state: runId must match projected JSONL state");
   }
 
-  if (report.classification === "terminal") {
+  if (report.classification === "terminal" || report.run.terminalState !== undefined) {
     return report;
   }
 

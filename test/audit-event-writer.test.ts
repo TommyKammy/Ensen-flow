@@ -107,9 +107,29 @@ describe("neutral audit event writer", () => {
       schemaVersion: "flow.audit-evidence-export.v1",
       boundary: {
         productionEvidenceReady: false,
-        protocolEvidenceProfile: "pending-protocol-phase-4"
+        protocolSnapshot: {
+          name: "ensen-protocol",
+          version: "0.3.0"
+        },
+        protocolEvidenceProfile: "operational-evidence-profile.v1"
       },
       publicSafe: {
+        profile: {
+          dataClassification: "public",
+          producerMetadata: {
+            producer: "ensen-flow",
+            producerVersion: "flow.audit-evidence-export.v1",
+            protocolVersion: "0.3.0",
+            command: "export-audit-evidence",
+            boundary: "local-audit-evidence-export",
+            createdBy: "ensen-flow"
+          },
+          retentionHint: "localEphemeral",
+          confidentialReferencePolicy: {
+            allowedInPublicSafe: false,
+            localConfidentialReferenceValuesExported: false
+          }
+        },
         run: {
           runId: "local-manual-demo-export",
           workflowId: "local-manual-demo",
@@ -130,7 +150,10 @@ describe("neutral audit event writer", () => {
             id: "evb_manual_export",
             correlationId: "corr_manual_export",
             type: "local_path",
-            uri: "artifacts/evidence/manual-export/bundle.json"
+            uri: "artifacts/evidence/manual-export/bundle.json",
+            dataClassification: "public",
+            referenceKind: "publicSafeArtifactReference",
+            checksumPresence: "absent"
           }
         ],
         auditEvents: [

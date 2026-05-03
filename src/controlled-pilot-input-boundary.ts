@@ -18,6 +18,9 @@ export interface ControlledPilotInputBoundary {
   override?: ControlledPilotOverride;
 }
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim() !== "";
+
 export const explainControlledPilotBoundaryRejection = (
   input: {
     surface: string;
@@ -25,7 +28,7 @@ export const explainControlledPilotBoundaryRejection = (
   }
 ): string | undefined => {
   const prefix = `${input.surface} must declare a fake, local, or dry-run input boundary`;
-  if (input.boundary === undefined) {
+  if (input.boundary === undefined || input.boundary === null) {
     return `${prefix} before controlled pilot use`;
   }
 
@@ -37,11 +40,11 @@ export const explainControlledPilotBoundaryRejection = (
   const override = input.boundary.override;
   if (
     evidence === undefined ||
-    evidence.reference.trim() === "" ||
+    !isNonEmptyString(evidence?.reference) ||
     override === undefined ||
-    override.approvedBy.trim() === "" ||
-    override.approvedAt.trim() === "" ||
-    override.reason.trim() === ""
+    !isNonEmptyString(override?.approvedBy) ||
+    !isNonEmptyString(override?.approvedAt) ||
+    !isNonEmptyString(override?.reason)
   ) {
     return `${input.surface} real input requires explicit dry-run-first evidence and a human-controlled override`;
   }

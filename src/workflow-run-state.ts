@@ -363,6 +363,18 @@ export const inspectWorkflowRunRecovery = async (
   }
 
   const run = summarizeRecoveryRun(state.run);
+  if (state.run.terminalState === "failed" && hasLatestStepStatus(state.stepAttempts, "blocked")) {
+    return {
+      classification: "blocked",
+      action: "operator-review-required",
+      diagnostic:
+        "workflow run has blocked step attempts; operator review is required before retry, re-run, abandon, or manual repair",
+      historyPreserved: true,
+      run,
+      eventCount: state.events.length
+    };
+  }
+
   if (state.run.terminalState !== undefined) {
     return {
       classification: "terminal",

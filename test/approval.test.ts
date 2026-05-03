@@ -154,7 +154,7 @@ describe("approval recovery model", () => {
       executorStatus: "blocked",
       expectedAttemptStatus: "blocked",
       expectedRunStatus: "failed",
-      expectedClassification: "terminal",
+      expectedClassification: "blocked",
       expectedDecision: "block-run",
       expectedAuditStatus: "blocked",
       summary: "Required approval prerequisite is blocked."

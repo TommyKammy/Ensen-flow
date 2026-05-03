@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 const runbookPath = "docs/controlled-pilot-rollback-recovery-runbook.md";
+const flowClosurePath = "docs/x-gate3-track-a-flow-closure.md";
 const readmePath = "README.md";
 const docsIndexPath = "docs/README.md";
 const operationalEvidenceSnapshotReadmePath =
@@ -45,6 +46,52 @@ describe("documentation navigation", () => {
     expect(snapshotReadme).toContain(
       "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0"
     );
+  });
+
+  it("documents Flow-side X-Gate 3 Track A closure evidence without host-local paths", async () => {
+    const [readme, docsIndex, closure] = await Promise.all([
+      readFile(readmePath, "utf8"),
+      readFile(docsIndexPath, "utf8"),
+      readFile(flowClosurePath, "utf8")
+    ]);
+
+    expect(readme).toContain("docs/x-gate3-track-a-flow-closure.md");
+    expect(docsIndex).toContain("x-gate3-track-a-flow-closure.md");
+
+    for (const requiredText of [
+      "Flow-side X-Gate 3 Track A contribution is complete",
+      "03d4175b11fd5cd888b04ceb865453933da885ac",
+      "#82",
+      "#88",
+      "#96",
+      "#97",
+      "#101",
+      "#102",
+      "#103",
+      "Ensen-protocol issue #50",
+      "Ensen-protocol PR #51",
+      "v0.3.0",
+      "npm run build",
+      "npm test",
+      "node dist/index.js issue-lint 104 --config supervisor.config.coderabbit.json",
+      "Ensen-general/Roadmap/X-Gate 3 Track A safety tracker.md",
+      "Ensen-general/Roadmap/Latest Roadmap.md",
+      "Overall X-Gate 3 Track A remains blocked by non-Flow Loop Track A work",
+      "customer repo execution",
+      "ERPNext live connector",
+      "regulated data",
+      "live write-back",
+      "electronic signature",
+      "batch release",
+      "final disposition",
+      "compliance claims"
+    ]) {
+      expect(closure).toContain(requiredText);
+    }
+
+    expect(closure).not.toMatch(posixHomeRootPattern);
+    expect(closure).not.toMatch(linuxHomeRootPattern);
+    expect(closure).not.toMatch(windowsHomeRootPattern);
   });
 
   it("documents controlled pilot recovery decisions without host-local paths", async () => {

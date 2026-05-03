@@ -222,6 +222,7 @@ describe("neutral audit event writer", () => {
     tempRoots.push(stateRoot);
     const statePath = join(stateRoot, "runs", "manual-run.jsonl");
     const windowsNetworkPath = ["", "", "server", "share", "bundle.json"].join("\\");
+    const posixHostFileUri = ["file://", "private", "tmp", "secret-bundle.json"].join("/");
 
     await createWorkflowRun(statePath, {
       runId: "local-manual-demo-export",
@@ -272,6 +273,14 @@ describe("neutral audit event writer", () => {
             type: "file_uri",
             uri: "file://server/share/bundle.json",
             createdAt: "2026-04-29T00:00:02.000Z"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_posix_host_file_uri_export",
+            correlationId: "corr_manual_export",
+            type: "file_uri",
+            uri: posixHostFileUri,
+            createdAt: "2026-04-29T00:00:02.000Z"
           }
         ]
       }
@@ -284,9 +293,12 @@ describe("neutral audit event writer", () => {
     ]);
     expect(exported.publicSafe.diagnostics).toEqual([
       "omitted an evidence reference because its URI is not public-safe (category: non-public-uri)",
+      "omitted an evidence reference because its URI is not public-safe (category: non-public-uri)",
       "omitted an evidence reference because its URI is not public-safe (category: non-public-uri)"
     ]);
-    expect(JSON.stringify(exported)).not.toContain(windowsNetworkPath);
+    const serialized = JSON.stringify(exported);
+    expect(serialized).not.toContain(windowsNetworkPath);
+    expect(serialized).not.toContain(posixHostFileUri);
   });
 
   it("rejects extra export-audit-evidence CLI arguments", async () => {

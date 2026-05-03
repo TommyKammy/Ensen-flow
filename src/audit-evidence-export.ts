@@ -7,6 +7,7 @@ import type {
   WorkflowStepAttemptEvent
 } from "./workflow-run-state.js";
 import type { NeutralAuditEvent } from "./audit-event-writer.js";
+import { classifyUnsafeWorkflowArtifactString } from "./workflow-artifact-hygiene.js";
 
 export interface CreateAuditEvidenceExportInput {
   statePath: string;
@@ -328,7 +329,7 @@ const collectEvidenceRefsFromValue = (
     if (isPublicSafeEvidenceRef(evidenceRef)) {
       refs.push(evidenceRef);
     } else {
-      diagnostics.push("omitted an evidence reference because its URI is not public-safe");
+      diagnostics.push(createUnsafeEvidenceRefDiagnostic(evidenceRef));
     }
     return;
   }
@@ -390,7 +391,7 @@ const normalizeChecksum = (
 };
 
 const isPublicSafeEvidenceRef = (ref: AuditEvidenceExportEvidenceRef): boolean => {
-  if (containsCredentialShape(ref.uri) || containsWorkstationLocalPath(ref.uri)) {
+  if (classifyUnsafeWorkflowArtifactString(ref.uri) !== undefined) {
     return false;
   }
 
@@ -411,6 +412,11 @@ const isSafeRelativePath = (value: string): boolean => {
     !trimmed.includes("://") &&
     !trimmed.split(/[\\/]+/u).includes("..")
   );
+};
+
+const createUnsafeEvidenceRefDiagnostic = (ref: AuditEvidenceExportEvidenceRef): string => {
+  const category = classifyUnsafeWorkflowArtifactString(ref.uri) ?? "non-public-uri";
+  return `omitted an evidence reference because its URI is not public-safe (category: ${category})`;
 };
 
 const isSafeFileUri = (value: string): boolean => {
@@ -434,21 +440,8 @@ const isSafeFileUri = (value: string): boolean => {
     return false;
   }
 
-  return (
-    !parsed.pathname.split("/").includes("..") &&
-    !containsWorkstationLocalPath(parsed.pathname)
-  );
+  return !parsed.pathname.split("/").includes("..");
 };
-
-const containsCredentialShape = (value: string): boolean =>
-  /(?:token|secret|password|passwd|apikey|api_key|access_key)=/iu.test(value) ||
-  /:\/\/[^/\s:@]+:[^/\s@]+@/u.test(value);
-
-const containsWorkstationLocalPath = (value: string): boolean =>
-  /(^|[/\\])Users[/\\][^/\\]+/u.test(value) ||
-  /(^|[/\\])home[/\\][^/\\]+/u.test(value) ||
-  isWindowsDriveAbsolutePath(value) ||
-  /(^|\/)[A-Za-z]:\//u.test(value);
 
 const isWindowsDriveAbsolutePath = (value: string): boolean =>
   /^[A-Za-z]:[/\\]/u.test(value);

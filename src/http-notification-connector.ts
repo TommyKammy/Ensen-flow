@@ -13,6 +13,10 @@ import type {
 import type {
   ControlledPilotInputBoundary
 } from "./controlled-pilot-input-boundary.js";
+import {
+  findUnsafeWorkflowArtifactValue,
+  formatUnsafeWorkflowArtifactDiagnostic
+} from "./workflow-artifact-hygiene.js";
 
 export type HttpNotificationMethod = "POST" | "PUT" | "PATCH";
 export type HttpNotificationOutcomeStatus = "succeeded" | "failed";
@@ -395,6 +399,17 @@ const validateSubmitRequest = (request: HttpNotificationSubmitRequest): string |
   const credentialKey = findCredentialShapedKey(request.notification);
   if (credentialKey !== undefined) {
     return `HTTP notification fixture must not include credential-shaped field ${credentialKey}`;
+  }
+
+  const unsafeArtifact = findUnsafeWorkflowArtifactValue(
+    {
+      idempotencyKey: request.idempotencyKey,
+      notification: request.notification
+    },
+    "notificationRequest"
+  );
+  if (unsafeArtifact !== undefined) {
+    return `HTTP notification fixture ${formatUnsafeWorkflowArtifactDiagnostic(unsafeArtifact)}`;
   }
 
   return undefined;

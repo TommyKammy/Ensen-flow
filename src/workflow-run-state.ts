@@ -2,6 +2,11 @@ import { constants } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import {
+  findUnsafeWorkflowArtifactValue,
+  formatUnsafeWorkflowArtifactDiagnostic
+} from "./workflow-artifact-hygiene.js";
+
 const ISO_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const TERMINAL_STATES = new Set([
@@ -611,6 +616,7 @@ const validateTrigger = (value: unknown, lineNumber: number): void => {
 
   if ("context" in value) {
     validateJsonSerializableValue(value.context, lineNumber, "trigger.context");
+    rejectUnsafeWorkflowArtifactValues(value.context, lineNumber, "trigger.context");
   }
 
   if ("idempotencyKey" in value) {
@@ -633,6 +639,7 @@ const validateIdempotencyMetadata = (value: unknown, lineNumber: number): void =
   }
 
   requireNonEmptyString(value, "key", lineNumber);
+  rejectUnsafeWorkflowArtifactValues(value.key, lineNumber, "idempotencyKey.key");
 };
 
 const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
@@ -653,6 +660,10 @@ const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
   if ("reason" in value && (typeof value.reason !== "string" || value.reason.trim() === "")) {
     throw stateError(lineNumber, "retry.reason must be a non-empty string");
   }
+
+  if ("reason" in value) {
+    rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "retry.reason");
+  }
 };
 
 const validateResultMetadata = (value: unknown, lineNumber: number): void => {
@@ -661,7 +672,7 @@ const validateResultMetadata = (value: unknown, lineNumber: number): void => {
   }
 
   validateJsonSerializableValue(value, lineNumber, "result");
-  rejectCredentialShapedStrings(value, lineNumber, "result");
+  rejectUnsafeWorkflowArtifactValues(value, lineNumber, "result");
 };
 
 const rejectUnknownKeys = (
@@ -827,29 +838,14 @@ const validateJsonSerializableValue = (
   throw stateError(lineNumber, `${path} must contain only JSON-serializable values`);
 };
 
-const rejectCredentialShapedStrings = (
+const rejectUnsafeWorkflowArtifactValues = (
   value: unknown,
   lineNumber: number,
   path: string
 ): void => {
-  if (typeof value === "string") {
-    if (containsCredentialShapedValue(value)) {
-      throw stateError(lineNumber, `${path} must not contain credential-shaped values`);
-    }
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => {
-      rejectCredentialShapedStrings(item, lineNumber, `${path}[${index}]`);
-    });
-    return;
-  }
-
-  if (isRecord(value)) {
-    Object.entries(value).forEach(([key, item]) => {
-      rejectCredentialShapedStrings(item, lineNumber, `${path}.${key}`);
-    });
+  const finding = findUnsafeWorkflowArtifactValue(value, path);
+  if (finding !== undefined) {
+    throw stateError(lineNumber, formatUnsafeWorkflowArtifactDiagnostic(finding));
   }
 };
 
@@ -904,10 +900,3 @@ const isStrictIsoTimestamp = (value: string): boolean => {
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
-
-const containsCredentialShapedValue = (value: string): boolean =>
-  /(?:^|\b)(?:password|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key)\s*[:=]/i.test(
-    value
-  ) ||
-  /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)[-_][A-Za-z0-9_-]{8,}\b/.test(value) ||
-  /-----BEGIN [A-Z ]*(?:PRIVATE KEY|TOKEN|SECRET)[A-Z ]*-----/.test(value);

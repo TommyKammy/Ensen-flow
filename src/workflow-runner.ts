@@ -113,6 +113,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   } else {
     const triggerReceivedAt = now();
     const createdAt = now();
+    let createdNewRun = false;
     try {
       await createWorkflowRun(input.statePath, {
         runId,
@@ -126,6 +127,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         },
         createdAt
       });
+      createdNewRun = true;
     } catch (error) {
       if (!isNodeError(error) || error.code !== "EEXIST") {
         throw error;
@@ -139,10 +141,12 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       }
       assertExistingRunRecoverable(competingState, orderedSteps);
     }
-    await auditWriter?.write({
-      type: "workflow.started",
-      occurredAt: createdAt
-    });
+    if (createdNewRun) {
+      await auditWriter?.write({
+        type: "workflow.started",
+        occurredAt: createdAt
+      });
+    }
   }
 
   for (const step of orderedSteps) {
@@ -437,6 +441,28 @@ const assertExistingRunRecoverable = (
   existingState: WorkflowRunState,
   orderedSteps: WorkflowStep[]
 ): void => {
+  let sawIncompleteStep = false;
+
+  for (const step of orderedSteps) {
+    const latestAttempt = latestStepAttempt(existingState.stepAttempts[step.id]);
+    if (latestAttempt?.status === "succeeded") {
+      if (sawIncompleteStep) {
+        throw new Error(
+          `existing workflow run state references step ${step.id} after an incomplete earlier step; manual repair is required before recovery`
+        );
+      }
+      continue;
+    }
+
+    if (latestAttempt !== undefined && sawIncompleteStep) {
+      throw new Error(
+        `existing workflow run state references step ${step.id} after an incomplete earlier step; manual repair is required before recovery`
+      );
+    }
+
+    sawIncompleteStep = true;
+  }
+
   for (const [stepId, attempts] of Object.entries(existingState.stepAttempts)) {
     if (!orderedSteps.some((step) => step.id === stepId)) {
       throw new Error(

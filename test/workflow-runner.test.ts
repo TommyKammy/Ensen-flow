@@ -51,6 +51,7 @@ describe("sequential workflow runner", () => {
   it("recovers a non-terminal JSONL run state from the next incomplete step", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
     const calls: string[] = [];
 
     await createWorkflowRun(statePath, {
@@ -88,6 +89,7 @@ describe("sequential workflow runner", () => {
     const result = await runWorkflow({
       definition,
       statePath,
+      auditPath,
       triggerContext: {
         requestId: "manual-recover"
       },
@@ -124,6 +126,71 @@ describe("sequential workflow runner", () => {
         status: "succeeded"
       }
     ]);
+
+    expect((await readAuditEvents(auditPath)).map((event) => event.type)).toEqual([
+      "step.started",
+      "step.completed",
+      "workflow.completed"
+    ]);
+  });
+
+  it("fails closed when persisted step history is not an ordered prefix", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-manual-prefix",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:07:00.000Z",
+        context: {
+          requestId: "manual-prefix"
+        },
+        idempotencyKey: {
+          source: "input",
+          key: "manual-prefix"
+        }
+      },
+      createdAt: "2026-04-29T00:07:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-manual-prefix",
+      stepId: "notify-operator",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:07:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-manual-prefix",
+      stepId: "notify-operator",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:07:03.000Z"
+    });
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-prefix"
+        }
+      })
+    ).rejects.toThrow(
+      "existing workflow run state references step notify-operator after an incomplete earlier step; manual repair is required before recovery"
+    );
+
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed"
+    ]);
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("emits deterministic neutral audit events for a successful run", async () => {

@@ -45,6 +45,20 @@ describe("connector capability matrix docs", () => {
       expect(matrix).toContain(requiredText);
     }
 
+    for (const requiredText of [
+      "Controlled Pilot Input Boundary",
+      "Track A controlled pilot candidates are dry-run-first",
+      "schedule trigger | Dry-run/local only",
+      "webhook intake | Fake/local only",
+      "local file connector | Local fixture only",
+      "HTTP notification connector | Fake/dry-run/local only",
+      "human-controlled override",
+      "Customer data, ERPNext live connectors, regulated data, Pharma/GxP workflow",
+      "compliance-readiness claims remain"
+    ]) {
+      expect(matrix).toContain(requiredText);
+    }
+
     expect(matrix).not.toMatch(posixHomeRootPattern);
     expect(matrix).not.toMatch(linuxHomeRootPattern);
     expect(matrix).not.toMatch(windowsHomeRootPattern);

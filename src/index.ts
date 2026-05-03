@@ -31,6 +31,10 @@ export {
 } from "./executor-connector.js";
 
 export {
+  explainControlledPilotBoundaryRejection
+} from "./controlled-pilot-input-boundary.js";
+
+export {
   createFakeHttpNotificationTransport,
   createHttpNotificationConnector
 } from "./http-notification-connector.js";
@@ -237,3 +241,11 @@ export type {
   NeutralAuditStepReference,
   NeutralAuditWorkflowReference
 } from "./audit-event-writer.js";
+
+export type {
+  ControlledPilotInputBoundary,
+  ControlledPilotInputBoundaryMode,
+  ControlledPilotOverride,
+  DryRunFirstEvidence,
+  DryRunFirstInputBoundaryMode
+} from "./controlled-pilot-input-boundary.js";

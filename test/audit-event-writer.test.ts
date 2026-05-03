@@ -324,6 +324,57 @@ describe("neutral audit event writer", () => {
     expect(serialized).not.toContain(posixHostFileUri);
   });
 
+  it("omits non-public evidence classifications instead of relabeling them as public-safe", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        evidenceBundleRef: {
+          schemaVersion: "eip.evidence-bundle-ref.v1",
+          id: "evb_internal_export",
+          correlationId: "corr_manual_export",
+          type: "local_path",
+          uri: "artifacts/evidence/internal/bundle.json",
+          createdAt: "2026-04-29T00:00:03.000Z",
+          dataClassification: "restricted"
+        }
+      }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.evidenceRefs).toEqual([]);
+    expect(exported.publicSafe.diagnostics).toEqual([
+      "omitted an evidence reference because its data classification is not public-safe"
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("evb_internal_export");
+  });
+
   it("rejects extra export-audit-evidence CLI arguments", async () => {
     const originalError = console.error;
     const errors: string[] = [];

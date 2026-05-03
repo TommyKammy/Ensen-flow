@@ -21,13 +21,56 @@ const operationalEvidenceSnapshotRoot = join(
   "v0.3.0"
 );
 const unsafeSnapshotTextPatterns = [
-  new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/")),
-  new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/")),
-  new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\")),
-  /AKIA[0-9A-Z]{16}/,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\b(?:password|secret|token|api[_-]?key)=\S+/i,
-  /\b(?:postgres|mysql|mongodb):\/\/[^<\s]+:[^<\s]+@/i
+  {
+    name: "posix user-home path",
+    pattern: new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/"))
+  },
+  {
+    name: "linux user-home path",
+    pattern: new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/"))
+  },
+  {
+    name: "windows user-home path",
+    pattern: new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\"))
+  },
+  {
+    name: "unsafe local file URI",
+    pattern: new RegExp(
+      [
+        "file:",
+        "",
+        "",
+        "(?:Users|home|private|tmp|var|opt|etc|srv|mnt|root|Volumes|usr|[A-Za-z]:)"
+      ].join("\\/")
+    )
+  },
+  { name: "network file URI", pattern: /file:\/\/[^/<>\s]+\/[^<>\s]+/i },
+  { name: "AWS access key", pattern: /AKIA[0-9A-Z]{16}/ },
+  { name: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  {
+    name: "raw secret assignment",
+    pattern: /\b(?:password|passwd|secret|api[_-]?key|access[_-]?key)=\S+/i
+  },
+  {
+    name: "raw token assignment",
+    pattern: /\btoken=\S+/i
+  },
+  {
+    name: "token-shaped value",
+    pattern: /\b(?:ghp|github_pat|glpat|xox[abprs]|sk)[-_][A-Za-z0-9_-]{8,}\b/i
+  },
+  {
+    name: "session cookie",
+    pattern: /\b(?:cookie|set-cookie)\s*:\s*[^;\n]*(?:session|sid)=|\b(?:sessionid|session_id|sid)=/i
+  },
+  {
+    name: "customer data literal",
+    pattern: /\b(?:customer(?:Id|Name|Email)|accountNumber|ssn)\s*[:=]\s*["']?[^"',\s]+/i
+  },
+  {
+    name: "credential-bearing database URI",
+    pattern: /\b(?:postgres|mysql|mongodb):\/\/[^<\s]+:[^<\s]+@/i
+  }
 ];
 
 const expectedSchemas = [
@@ -312,8 +355,10 @@ describe("Ensen-protocol snapshot boundary", () => {
       profileDoc,
       JSON.stringify(publicExample, null, 2)
     ]) {
-      for (const unsafePattern of unsafeSnapshotTextPatterns) {
-        expect(snapshotText).not.toMatch(unsafePattern);
+      for (const { name, pattern } of unsafeSnapshotTextPatterns) {
+        expect(snapshotText, `snapshot text must not contain ${name}`).not.toMatch(
+          pattern
+        );
       }
     }
   });

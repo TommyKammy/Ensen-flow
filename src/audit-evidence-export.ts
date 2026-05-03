@@ -116,6 +116,16 @@ export interface AuditEvidenceExportEvidenceRef {
   checksumPresence: "present" | "absent";
 }
 
+type EvidenceDataClassification = "public" | "internal" | "confidential" | "restricted";
+
+type NormalizedEvidenceRef = Omit<
+  AuditEvidenceExportEvidenceRef,
+  "dataClassification" | "referenceKind"
+> & {
+  dataClassification: EvidenceDataClassification;
+  referenceKind: "publicSafeArtifactReference" | "localConfidentialReference";
+};
+
 export interface AuditEvidenceExportLocalConfidentialReferences {
   statePath: AuditEvidenceExportLocalReference;
   auditPath?: AuditEvidenceExportLocalReference;
@@ -381,7 +391,7 @@ const collectEvidenceRefsFromValue = (
 
 const normalizeEvidenceRef = (
   value: Record<string, unknown>
-): AuditEvidenceExportEvidenceRef | undefined => {
+): NormalizedEvidenceRef | undefined => {
   if (value.schemaVersion !== EVIDENCE_REF_SCHEMA_VERSION) {
     return undefined;
   }
@@ -397,6 +407,7 @@ const normalizeEvidenceRef = (
   }
 
   const checksum = normalizeChecksum(value.checksum);
+  const dataClassification = normalizeDataClassification(value.dataClassification);
   return {
     schemaVersion: EVIDENCE_REF_SCHEMA_VERSION,
     id: value.id,
@@ -406,10 +417,25 @@ const normalizeEvidenceRef = (
     createdAt: value.createdAt,
     ...(typeof value.contentType === "string" ? { contentType: value.contentType } : {}),
     ...(checksum === undefined ? {} : { checksum }),
-    dataClassification: "public",
-    referenceKind: "publicSafeArtifactReference",
+    dataClassification,
+    referenceKind:
+      dataClassification === "public"
+        ? "publicSafeArtifactReference"
+        : "localConfidentialReference",
     checksumPresence: checksum === undefined ? "absent" : "present"
   };
+};
+
+const normalizeDataClassification = (value: unknown): EvidenceDataClassification => {
+  if (
+    value === "internal" ||
+    value === "confidential" ||
+    value === "restricted"
+  ) {
+    return value;
+  }
+
+  return "public";
 };
 
 const normalizeChecksum = (
@@ -433,7 +459,13 @@ const normalizeChecksum = (
   };
 };
 
-const isPublicSafeEvidenceRef = (ref: AuditEvidenceExportEvidenceRef): boolean => {
+const isPublicSafeEvidenceRef = (
+  ref: NormalizedEvidenceRef
+): ref is AuditEvidenceExportEvidenceRef => {
+  if (ref.dataClassification !== "public") {
+    return false;
+  }
+
   if (classifyUnsafeWorkflowArtifactString(ref.uri) !== undefined) {
     return false;
   }
@@ -457,7 +489,11 @@ const isSafeRelativePath = (value: string): boolean => {
   );
 };
 
-const createUnsafeEvidenceRefDiagnostic = (ref: AuditEvidenceExportEvidenceRef): string => {
+const createUnsafeEvidenceRefDiagnostic = (ref: NormalizedEvidenceRef): string => {
+  if (ref.dataClassification !== "public") {
+    return "omitted an evidence reference because its data classification is not public-safe";
+  }
+
   const category = classifyUnsafeWorkflowArtifactString(ref.uri) ?? "non-public-uri";
   return `omitted an evidence reference because its URI is not public-safe (category: ${category})`;
 };

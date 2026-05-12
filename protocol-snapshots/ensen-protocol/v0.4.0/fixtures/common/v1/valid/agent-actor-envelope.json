@@ -1,0 +1,28 @@
+{
+  "artifactId": "artifact_agentActor001",
+  "correlationId": "corr_agentActor0001",
+  "createdAt": "2026-04-29T01:00:00Z",
+  "actor": {
+    "actorId": "actor_agent0001",
+    "actorType": "agent",
+    "displayName": "Fixture Agent"
+  },
+  "source": {
+    "sourceId": "source_fixture0001",
+    "sourceType": "fixture",
+    "externalRef": "public-fixture/agent-actor-envelope"
+  },
+  "workItem": {
+    "workItemId": "workitem_protocol0001",
+    "title": "Define common schema conventions"
+  },
+  "changeRequest": {
+    "changeRequestId": "cr_issue0003",
+    "status": "open"
+  },
+  "evidenceBundle": {
+    "evidenceBundleId": "evb_common0001",
+    "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "classification": "public"
+}

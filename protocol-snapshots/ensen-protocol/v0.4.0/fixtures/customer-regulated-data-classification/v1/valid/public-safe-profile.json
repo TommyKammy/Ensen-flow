@@ -1,0 +1,56 @@
+{
+  "profile": "track-b-classification.v1",
+  "scenario": "public-safe-track-b-profile",
+  "track": "X-Gate 3 Track B",
+  "boundary": "customer / regulated evidence planning",
+  "exampleClassification": "public",
+  "classificationTerms": [
+    "public",
+    "internal",
+    "confidential",
+    "customer-confidential",
+    "regulated"
+  ],
+  "classificationRequiredFor": [
+    "EvidenceBundleRef Track B evidence references",
+    "AuditEvent regulated evidence handling facts",
+    "operational evidence profile handoff records",
+    "protocol snapshot records that include Track B classification evidence"
+  ],
+  "failClosedPolicy": {
+    "missingClassification": "reject or route explicit follow-up",
+    "unknownClassification": "reject or route explicit follow-up",
+    "inferredClassification": "do not infer from path shape, repository naming, or operator summaries"
+  },
+  "publicFixtureSafety": {
+    "containsCustomerData": false,
+    "containsRegulatedData": false,
+    "containsSecrets": false,
+    "containsPrivateRepositoryDetails": false,
+    "containsWorkstationLocalAbsolutePath": false,
+    "placeholderEvidenceRoot": "<evidence-root>/track-b/public-safe-example.json"
+  },
+  "confidentialReferenceExample": {
+    "id": "confref_synthetic_0001",
+    "locator": "<controlled-evidence-root>/track-b/synthetic-reference.json",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+    },
+    "producerMetadata": {
+      "producer": "synthetic-producer",
+      "boundary": "protocol-example",
+      "producedAt": "2026-01-01T00:00:00Z"
+    },
+    "dataClassification": "public"
+  },
+  "nonClaims": [
+    "not production-ready",
+    "not a validated system",
+    "not a compliance guarantee",
+    "not live ERPNext write-back",
+    "not electronic signature",
+    "not batch release",
+    "not final disposition approval"
+  ]
+}

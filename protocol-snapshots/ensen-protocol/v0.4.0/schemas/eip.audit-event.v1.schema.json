@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eip.ensen.dev/schemas/eip.audit-event.v1.schema.json",
+  "title": "EIP-0003 AuditEvent v1",
+  "description": "Transport-neutral append-only audit and evidence stream event contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "correlationId",
+    "subject",
+    "type",
+    "actor",
+    "occurredAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "eip.audit-event.v1"
+    },
+    "id": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "correlationId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/CorrelationId"
+    },
+    "causationId": {
+      "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "subject": {
+      "$ref": "#/$defs/AuditSubject"
+    },
+    "type": {
+      "$ref": "#/$defs/EventType"
+    },
+    "severity": {
+      "$ref": "#/$defs/AuditSeverity"
+    },
+    "actor": {
+      "$ref": "eip.common.v1.schema.json#/$defs/ActorRef"
+    },
+    "occurredAt": {
+      "$ref": "eip.common.v1.schema.json#/$defs/IsoDateTimeUtc"
+    },
+    "payload": {
+      "$ref": "#/$defs/AuditPayload"
+    },
+    "dataClassification": {
+      "$ref": "eip.common.v1.schema.json#/$defs/DataClassification"
+    },
+    "extensions": {
+      "$ref": "eip.common.v1.schema.json#/$defs/ExtensionMap"
+    }
+  },
+  "$defs": {
+    "AuditSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subjectId", "subjectType"],
+      "properties": {
+        "subjectId": {
+          "$ref": "eip.common.v1.schema.json#/$defs/PrefixedId"
+        },
+        "subjectType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "externalRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "EventType": {
+      "type": "string",
+      "description": "Dot-separated event type namespace registered by the owning EIP.",
+      "minLength": 3,
+      "maxLength": 160,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$"
+    },
+    "AuditSeverity": {
+      "type": "string",
+      "enum": ["debug", "info", "notice", "warning", "error", "critical"]
+    },
+    "AuditPayload": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

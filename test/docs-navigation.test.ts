@@ -8,6 +8,8 @@ const readmePath = "README.md";
 const docsIndexPath = "docs/README.md";
 const operationalEvidenceSnapshotReadmePath =
   "protocol-snapshots/ensen-protocol/v0.3.0/README.md";
+const trackBEvidenceSnapshotReadmePath =
+  "protocol-snapshots/ensen-protocol/v0.4.0/README.md";
 const posixHomeRootPattern = new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/"));
 const linuxHomeRootPattern = new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/"));
 const windowsHomeRootPattern = new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\"));
@@ -46,6 +48,41 @@ describe("documentation navigation", () => {
     expect(snapshotReadme).toContain(
       "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.3.0"
     );
+  });
+
+  it("links the Protocol v0.4.0 Track B evidence boundary snapshot from public docs", async () => {
+    const [readme, docsIndex, snapshotReadme] = await Promise.all([
+      readFile(readmePath, "utf8"),
+      readFile(docsIndexPath, "utf8"),
+      readFile(trackBEvidenceSnapshotReadmePath, "utf8")
+    ]);
+
+    for (const requiredLink of [
+      "protocol-snapshots/ensen-protocol/v0.4.0/README.md",
+      "protocol-snapshots/ensen-protocol/v0.4.0/docs/data-classification.md",
+      "protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/customer-regulated-data-classification-profile.md",
+      "protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/approval-and-draft-evidence-semantics.md"
+    ]) {
+      expect(readme).toContain(requiredLink);
+    }
+
+    for (const requiredLink of [
+      "../protocol-snapshots/ensen-protocol/v0.4.0/README.md",
+      "../protocol-snapshots/ensen-protocol/v0.4.0/docs/data-classification.md",
+      "../protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/customer-regulated-data-classification-profile.md",
+      "../protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/approval-and-draft-evidence-semantics.md"
+    ]) {
+      expect(docsIndex).toContain(requiredLink);
+    }
+
+    expect(snapshotReadme).toContain("release tag `v0.4.0`");
+    expect(snapshotReadme).toContain(
+      "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.4.0"
+    );
+    expect(snapshotReadme).toContain(
+      "This snapshot is protocol intake only"
+    );
+    expect(snapshotReadme).toContain("It does not add ERPNext live connector");
   });
 
   it("documents Flow-side X-Gate 3 Track A closure evidence without host-local paths", async () => {

@@ -1,0 +1,39 @@
+{
+  "artifactId": "artifact_commonEnvelope001",
+  "correlationId": "corr_commonTypes0001",
+  "createdAt": "2026-04-29T01:00:00Z",
+  "actor": {
+    "actorId": "actor_workflow001",
+    "actorType": "workflow",
+    "displayName": "Fixture Producer"
+  },
+  "source": {
+    "sourceId": "source_fixture0001",
+    "sourceType": "fixture",
+    "externalRef": "public-fixture/common-envelope"
+  },
+  "workItem": {
+    "workItemId": "workitem_protocol0001",
+    "title": "Define common schema conventions"
+  },
+  "changeRequest": {
+    "changeRequestId": "cr_issue0003",
+    "status": "open"
+  },
+  "evidenceBundle": {
+    "evidenceBundleId": "evb_common0001",
+    "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "classification": "public",
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Example error payload for contract validation.",
+    "retryable": false,
+    "details": {
+      "field": "artifactId"
+    }
+  },
+  "extensions": {
+    "x-fixture-note": "public example only"
+  }
+}

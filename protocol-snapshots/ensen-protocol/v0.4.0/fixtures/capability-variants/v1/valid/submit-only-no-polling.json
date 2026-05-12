@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "eip.capability-variant.example.v1",
+  "variant": "submit-only-no-polling",
+  "description": "partial capability variant example for a synthetic boundary that accepts submission but does not publish protocol polling.",
+  "protocolSnapshot": {
+    "tag": "v0.1.0",
+    "commit": "43fa3e7",
+    "issue": "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+  },
+  "runtimeBoundary": "none",
+  "boundaryRef": "<executor-boundary>",
+  "artifactRefs": [
+    "fixtures/run-request/v1/valid/manual-request.json",
+    "fixtures/run-result/v1/valid/succeeded-result.json"
+  ],
+  "capabilitySummary": {
+    "submit": "required baseline",
+    "status": "unsupported",
+    "cancel": "unsupported",
+    "fetchEvidence": "unsupported",
+    "polling support": "unsupported",
+    "evidence reference support": "partial",
+    "idempotency expectation": "required baseline"
+  },
+  "expectedConformance": [
+    "consumer-local waiting may exist but must not be presented as RunStatusSnapshot polling",
+    "terminal RunResult must remain bound to the submitted RunRequest",
+    "unsupported polling must not fabricate completed, failed, blocked, or cancelled snapshots"
+  ],
+  "conformanceUse": "Loop and Flow consumers can use this example to verify submit-only transports stay explicit about unsupported polling."
+}

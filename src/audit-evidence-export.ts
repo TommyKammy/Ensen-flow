@@ -26,7 +26,7 @@ export interface AuditEvidenceExportBoundary {
   productionEvidenceReady: false;
   protocolSnapshot: {
     name: "ensen-protocol";
-    version: "0.3.0";
+    version: "0.4.0";
   };
   protocolEvidenceProfile: "operational-evidence-profile.v1";
   notes: string[];
@@ -63,7 +63,7 @@ export interface AuditEvidenceExportPublicSafeProfile {
   producerMetadata: {
     producer: "ensen-flow";
     producerVersion: "flow.audit-evidence-export.v1";
-    protocolVersion: "0.3.0";
+    protocolVersion: "0.4.0";
     command: "export-audit-evidence";
     boundary: "local-audit-evidence-export";
     createdBy: "ensen-flow";
@@ -116,7 +116,13 @@ export interface AuditEvidenceExportEvidenceRef {
   checksumPresence: "present" | "absent";
 }
 
-type EvidenceDataClassification = "public" | "internal" | "confidential" | "restricted";
+type EvidenceDataClassification =
+  | "public"
+  | "internal"
+  | "confidential"
+  | "customer-confidential"
+  | "regulated"
+  | "restricted";
 
 type NormalizedEvidenceRef = Omit<
   AuditEvidenceExportEvidenceRef,
@@ -158,13 +164,13 @@ export const createAuditEvidenceExport = async (
       productionEvidenceReady: false,
       protocolSnapshot: {
         name: "ensen-protocol",
-        version: "0.3.0"
+        version: "0.4.0"
       },
       protocolEvidenceProfile: "operational-evidence-profile.v1",
       notes: [
         "This is a deterministic local metadata export skeleton.",
         "It is not a production evidence archive, compliance bundle, or customer data export.",
-        "It uses the copied Protocol v0.3.0 operational evidence profile vocabulary without claiming protocol conformance or production evidence readiness."
+        "It uses the copied Protocol v0.4.0 operational evidence and Track B classification vocabulary without claiming protocol conformance, regulated workflow execution, or production evidence readiness."
       ]
     },
     publicSafe: {
@@ -173,7 +179,7 @@ export const createAuditEvidenceExport = async (
         producerMetadata: {
           producer: "ensen-flow",
           producerVersion: EXPORT_SCHEMA_VERSION,
-          protocolVersion: "0.3.0",
+          protocolVersion: "0.4.0",
           command: "export-audit-evidence",
           boundary: "local-audit-evidence-export",
           createdBy: "ensen-flow"
@@ -440,6 +446,8 @@ const normalizeDataClassification = (
   if (
     value === "internal" ||
     value === "confidential" ||
+    value === "customer-confidential" ||
+    value === "regulated" ||
     value === "restricted"
   ) {
     return value;

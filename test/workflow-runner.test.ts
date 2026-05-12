@@ -13,6 +13,7 @@ import {
   runWorkflow
 } from "../src/index.js";
 import type {
+  CustomerWorkflowAllowlistPolicy,
   ExecutorConnectorStatusSnapshot,
   WorkflowDefinition
 } from "../src/index.js";
@@ -41,6 +42,21 @@ const readAuditEvents = async (auditPath: string): Promise<Array<Record<string, 
     .trimEnd()
     .split("\n")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+const customerWorkflowAllowlistPolicy = (): CustomerWorkflowAllowlistPolicy => ({
+  schemaVersion: "flow.customer-workflow-allowlist.v1",
+  entries: [
+    {
+      customerWorkflowRef: "public-release-approval",
+      modes: ["fake", "read-only", "draft-only", "live-write-back"],
+      erpNext: {
+        siteRefs: ["erpnext-public-demo"],
+        objectTypes: ["Sales Order"],
+        endpointRefs: ["erpnext-public-api"]
+      }
+    }
+  ]
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -353,6 +369,121 @@ describe("sequential workflow runner", () => {
     );
 
     expect(stepHandlerCalled).toBe(false);
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails closed when customer workflow input has no allowlist before writing state or audit records", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let stepHandlerCalled = false;
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-customer-workflow-miss",
+          customerWorkflow: {
+            ref: "customer-workflow-private-placeholder",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-private-site-placeholder",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-private-endpoint-placeholder"
+            }
+          }
+        },
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow(
+      "customer workflow input is not allowlisted for mode draft-only; diagnostic redacted"
+    );
+
+    expect(stepHandlerCalled).toBe(false);
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("runs customer workflow input only when workflow and ERPNext references match the allowlist", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.metadata = {
+      ...definition.metadata,
+      customerWorkflowAllowlist: customerWorkflowAllowlistPolicy()
+    };
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-customer-workflow-pass",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      }
+    });
+
+    expect(result.run.status).toBe("succeeded");
+  });
+
+  it("redacts unsafe customer workflow and ERPNext values from allowlist miss diagnostics", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.metadata = {
+      ...definition.metadata,
+      customerWorkflowAllowlist: customerWorkflowAllowlistPolicy()
+    };
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        triggerContext: {
+          requestId: "manual-customer-workflow-redacted",
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-private-site-placeholder",
+              objectType: "regulated-object-placeholder",
+              endpointRef: "erpnext-private-endpoint-placeholder"
+            }
+          }
+        }
+      })
+    ).rejects.toThrow(
+      "ERPNext reference is not allowlisted for mode draft-only; diagnostic redacted"
+    );
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath: await createTempStatePath(),
+        triggerContext: {
+          requestId: "manual-customer-workflow-live-write-back",
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "live-write-back"
+          }
+        }
+      })
+    ).rejects.toThrow(
+      "customer workflow input requested live-write-back mode; ERPNext live write-back remains disabled; diagnostic redacted"
+    );
+
     await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });

@@ -35,6 +35,10 @@ export {
 } from "./controlled-pilot-input-boundary.js";
 
 export {
+  assertCustomerWorkflowAllowlisted
+} from "./customer-workflow-allowlist.js";
+
+export {
   createFakeHttpNotificationTransport,
   createHttpNotificationConnector
 } from "./http-notification-connector.js";
@@ -274,3 +278,12 @@ export type {
   DryRunFirstEvidence,
   DryRunFirstInputBoundaryMode
 } from "./controlled-pilot-input-boundary.js";
+
+export type {
+  CustomerWorkflowAllowlistEntry,
+  CustomerWorkflowAllowlistMode,
+  CustomerWorkflowAllowlistPolicy,
+  CustomerWorkflowErpNextAllowlist,
+  CustomerWorkflowErpNextReference,
+  CustomerWorkflowInput
+} from "./customer-workflow-allowlist.js";

@@ -27,6 +27,7 @@ import {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
+import { assertCustomerWorkflowAllowlisted } from "./customer-workflow-allowlist.js";
 import type {
   IdempotencyKeyDefinition,
   RetryPolicy,
@@ -82,6 +83,10 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const orderedSteps = orderSteps(input.definition.steps);
   const now = input.now ?? (() => new Date().toISOString());
   const triggerContext = input.triggerContext ?? {};
+  assertCustomerWorkflowAllowlisted({
+    definition: input.definition,
+    triggerContext
+  });
   const triggerIdempotencyKey = resolveIdempotencyKey(
     input.definition.trigger.idempotencyKey,
     input.definition,

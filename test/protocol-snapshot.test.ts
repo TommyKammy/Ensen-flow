@@ -20,6 +20,12 @@ const operationalEvidenceSnapshotRoot = join(
   "ensen-protocol",
   "v0.3.0"
 );
+const trackBEvidenceSnapshotRoot = join(
+  process.cwd(),
+  "protocol-snapshots",
+  "ensen-protocol",
+  "v0.4.0"
+);
 const unsafeSnapshotTextPatterns = [
   {
     name: "posix user-home path",
@@ -106,6 +112,11 @@ const readOperationalEvidenceJson = async (
 ): Promise<unknown> =>
   JSON.parse(
     await readFile(join(operationalEvidenceSnapshotRoot, relativePath), "utf8")
+  ) as unknown;
+
+const readTrackBEvidenceJson = async (relativePath: string): Promise<unknown> =>
+  JSON.parse(
+    await readFile(join(trackBEvidenceSnapshotRoot, relativePath), "utf8")
   ) as unknown;
 
 const listJsonFixtures = async (relativePath: string): Promise<string[]> => {
@@ -354,6 +365,160 @@ describe("Ensen-protocol snapshot boundary", () => {
       ),
       profileDoc,
       JSON.stringify(publicExample, null, 2)
+    ]) {
+      for (const { name, pattern } of unsafeSnapshotTextPatterns) {
+        expect(snapshotText, `snapshot text must not contain ${name}`).not.toMatch(
+          pattern
+        );
+      }
+    }
+  });
+
+  it("vendors the Ensen-protocol v0.4.0 Track B evidence boundary snapshot", async () => {
+    await expect(readTrackBEvidenceJson("manifest.json")).resolves.toEqual({
+      source: {
+        repository: "TommyKammy/Ensen-protocol",
+        releaseTag: "v0.4.0",
+        releaseUrl:
+          "https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.4.0",
+        protocolVersion: "0.4.0",
+        tagObjectSha: "3e3eddbd0ca654644f7e2676361ff60a80bb972a",
+        targetCommit: "f6c3c5bee2574c8660f6954fe58a9e7625daad12"
+      },
+      policy: {
+        updatePolicy:
+          "Copied snapshot. Update only by replacing this directory from a tagged Ensen-protocol release.",
+        runtimeDependency: false,
+        copiedArtifactsUnmodified: true
+      },
+      includes: {
+        schemas: expectedSchemas,
+        supportSchemas,
+        profileDocs: [
+          "docs/data-classification.md",
+          "docs/integration/customer-regulated-data-classification-profile.md",
+          "docs/integration/approval-and-draft-evidence-semantics.md",
+          "docs/integration/operational-evidence-profile.md"
+        ],
+        fixtureFamilies: [
+          "customer-regulated-data-classification",
+          "approval-evidence-semantics",
+          "operational-evidence-profile"
+        ],
+        publicFixtureSafeExamples: [
+          "fixtures/customer-regulated-data-classification/v1/valid/public-safe-profile.json",
+          "fixtures/approval-evidence-semantics/v1/valid/public-safe-draft-action.json",
+          "fixtures/operational-evidence-profile/v1/valid/public-fixture-safe-profile.json"
+        ]
+      },
+      validationEvidence: {
+        recordedFromSourceRelease: true,
+        commands: [
+          "npm test",
+          "npm run check:fixtures",
+          "npm run check:public-fixtures",
+          "npm run check:schema-ids",
+          "npm run check:spec-boundary"
+        ]
+      },
+      intentionalExclusions: expect.arrayContaining([
+        expect.stringContaining("No Ensen-protocol runtime"),
+        expect.stringContaining("No ERPNext live connector behavior"),
+        expect.stringContaining("v0.2.0 connector schema snapshot remains")
+      ])
+    });
+
+    const commonSchema = (await readTrackBEvidenceJson(
+      "schemas/eip.common.v1.schema.json"
+    )) as { $defs?: { DataClassification?: { enum?: unknown[] } } };
+    const classificationProfile = (await readTrackBEvidenceJson(
+      "fixtures/customer-regulated-data-classification/v1/valid/public-safe-profile.json"
+    )) as {
+      classificationTerms?: unknown[];
+      publicFixtureSafety?: Record<string, unknown>;
+      confidentialReferenceExample?: { dataClassification?: unknown };
+      nonClaims?: unknown[];
+    };
+    const approvalProfile = (await readTrackBEvidenceJson(
+      "fixtures/approval-evidence-semantics/v1/valid/public-safe-draft-action.json"
+    )) as {
+      dataClassification?: unknown;
+      approvalVocabulary?: unknown[];
+      draftOnlyActionArtifact?: Record<string, unknown>;
+      nonClaims?: unknown[];
+    };
+
+    expect(commonSchema.$defs?.DataClassification?.enum).toEqual(
+      expect.arrayContaining([
+        "public",
+        "internal",
+        "customer-confidential",
+        "regulated"
+      ])
+    );
+    expect(classificationProfile.classificationTerms).toEqual(
+      expect.arrayContaining([
+        "public",
+        "internal",
+        "customer-confidential",
+        "regulated"
+      ])
+    );
+    expect(classificationProfile.publicFixtureSafety).toEqual(
+      expect.objectContaining({
+        containsCustomerData: false,
+        containsRegulatedData: false,
+        containsSecrets: false,
+        containsWorkstationLocalAbsolutePath: false
+      })
+    );
+    expect(classificationProfile.confidentialReferenceExample?.dataClassification).toBe(
+      "public"
+    );
+    expect(classificationProfile.nonClaims).toEqual(
+      expect.arrayContaining(["not a compliance guarantee", "not live ERPNext write-back"])
+    );
+    expect(approvalProfile.dataClassification).toBe("public");
+    expect(approvalProfile.approvalVocabulary).toEqual(
+      expect.arrayContaining([
+        "approval-required",
+        "approved",
+        "rejected",
+        "revoked",
+        "superseded"
+      ])
+    );
+    expect(approvalProfile.draftOnlyActionArtifact).toEqual(
+      expect.objectContaining({
+        intent: "draft-only",
+        approvalState: "approval-required",
+        externalApplicationState: "not-applied"
+      })
+    );
+    expect(approvalProfile.nonClaims).toEqual(
+      expect.arrayContaining(["not live write-back approval", "not a validated system"])
+    );
+
+    for (const snapshotText of [
+      await readFile(join(trackBEvidenceSnapshotRoot, "README.md"), "utf8"),
+      await readFile(join(trackBEvidenceSnapshotRoot, "manifest.json"), "utf8"),
+      await readFile(join(trackBEvidenceSnapshotRoot, "docs/data-classification.md"), "utf8"),
+      await readFile(
+        join(
+          trackBEvidenceSnapshotRoot,
+          "docs/integration/customer-regulated-data-classification-profile.md"
+        ),
+        "utf8"
+      ),
+      await readFile(
+        join(
+          trackBEvidenceSnapshotRoot,
+          "docs/integration/approval-and-draft-evidence-semantics.md"
+        ),
+        "utf8"
+      ),
+      JSON.stringify(classificationProfile, null, 2),
+      JSON.stringify(approvalProfile, null, 2)
     ]) {
       for (const { name, pattern } of unsafeSnapshotTextPatterns) {
         expect(snapshotText, `snapshot text must not contain ${name}`).not.toMatch(

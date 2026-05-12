@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "eip.audit-event.v1",
+  "id": "evt_01HVAX8J2K6T3QW4R5Y7M8N9B",
+  "correlationId": "corr_01HV9ZX8J2K6T3QW4R5Y7M8N9U",
+  "causationId": "evt_01HVAX8J2K6T3QW4R5Y7M8N9A",
+  "subject": {
+    "subjectId": "flowstep_01HVAX8J2K6T3QW4R5Y7M8N9C",
+    "subjectType": "flow-step",
+    "externalRef": "validation/audit-event-schema"
+  },
+  "type": "flow.step.completed",
+  "actor": {
+    "actorId": "actor_01HV7Y8M8F2KQ5W3P9R6T4N2AE",
+    "actorType": "executor",
+    "displayName": "Ensen flow worker"
+  },
+  "occurredAt": "2026-04-29T03:25:00Z",
+  "sequence": 2,
+  "severity": "notice",
+  "payload": {
+    "stepName": "schema-validation",
+    "status": "completed"
+  },
+  "dataClassification": "public"
+}

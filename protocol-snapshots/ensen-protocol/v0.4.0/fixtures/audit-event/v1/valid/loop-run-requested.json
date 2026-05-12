@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "eip.audit-event.v1",
+  "id": "evt_01HVAX8J2K6T3QW4R5Y7M8N9A",
+  "correlationId": "corr_01HV7Y8M8F2KQ5W3P9R6T4N2AC",
+  "subject": {
+    "subjectId": "req_01HV7Y8M8F2KQ5W3P9R6T4N2AB",
+    "subjectType": "run-request",
+    "externalRef": "github-issue-6"
+  },
+  "type": "loop.run.requested",
+  "actor": {
+    "actorId": "actor_01HV7Y8M8F2KQ5W3P9R6T4N2AE",
+    "actorType": "connector",
+    "displayName": "Ensen issue dispatcher"
+  },
+  "occurredAt": "2026-04-29T03:20:00Z",
+  "sequence": 1,
+  "severity": "info",
+  "payload": {
+    "mode": "plan",
+    "command": "npm test -- test/audit-event-schema.test.ts"
+  },
+  "dataClassification": "public",
+  "extensions": {
+    "x-fixture-note": "synthetic loop run requested event"
+  }
+}

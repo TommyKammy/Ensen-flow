@@ -1,0 +1,55 @@
+{
+  "profile": "Track B approval and draft-only evidence semantics",
+  "schemaVersion": "approval-evidence-semantics.example.v1",
+  "dataClassification": "public",
+  "approvalVocabulary": [
+    "approval-required",
+    "approved",
+    "rejected",
+    "revoked",
+    "superseded"
+  ],
+  "draftOnlyActionArtifact": {
+    "id": "draft_action_01HX3K7Y2H5N8R4P9Q6M1A2B3C",
+    "intent": "draft-only",
+    "approvalState": "approval-required",
+    "externalApplicationState": "not-applied",
+    "subjectRef": "<repository-ref>",
+    "approvalBoundary": "<approval-boundary>",
+    "reviewerRef": "<reviewer-ref>"
+  },
+  "auditEventUsage": {
+    "schemaVersion": "eip.audit-event.v1",
+    "type": "flow.approval.required",
+    "payloadShape": {
+      "approvalState": "approval-required",
+      "artifactIntent": "draft-only",
+      "externalApplicationState": "not-applied",
+      "decisionBoundary": "<approval-boundary>"
+    }
+  },
+  "evidenceBundleRefUsage": {
+    "schemaVersion": "eip.evidence-bundle-ref.v1",
+    "type": "local_path",
+    "uri": "fixtures/approval-evidence-semantics/v1/valid/public-safe-draft-action.json",
+    "metadataShape": {
+      "approvalState": "approval-required",
+      "artifactIntent": "draft-only",
+      "externalApplicationState": "not-applied"
+    }
+  },
+  "rejectedRevokedSupersededHandling": {
+    "rejected": "append a rejected evidence fact and keep the action not-applied",
+    "revoked": "append a revoked evidence fact and require a new authoritative approval before applying",
+    "superseded": "append a superseded evidence fact that points to the newer authoritative reference"
+  },
+  "nonClaims": [
+    "not automatic quality decision",
+    "not live write-back approval",
+    "not electronic signature",
+    "not batch release",
+    "not final disposition",
+    "not a validated system",
+    "not a compliance guarantee"
+  ]
+}

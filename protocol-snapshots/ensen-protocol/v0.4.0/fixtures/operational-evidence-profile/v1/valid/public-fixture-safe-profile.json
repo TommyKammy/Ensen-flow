@@ -1,0 +1,38 @@
+{
+  "profile": "operational-evidence-profile.v1",
+  "scenario": "public-fixture-safe-artifact",
+  "track": "X-Gate 3 Track A",
+  "boundary": "owner-controlled repo / solo dogfood",
+  "evidence": {
+    "dataClassification": "public",
+    "referenceKind": "publicFixtureSafeArtifact",
+    "uri": "artifacts/evidence/synthetic-run/bundle.json",
+    "contentType": "application/json",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  },
+  "producerMetadata": {
+    "producer": "ensen-loop",
+    "producerVersion": "example-snapshot",
+    "protocolVersion": "example-protocol-snapshot",
+    "command": "npm test",
+    "boundary": "parser"
+  },
+  "retentionHint": "publicFixture",
+  "confidentialReferencePolicy": {
+    "allowedInPublicFixture": false,
+    "placeholder": "<evidence-root>/private-run/bundle.json",
+    "guidance": "Keep local confidential reference values in the owning Loop or Flow evidence boundary."
+  },
+  "nonGoals": [
+    "external repository input",
+    "ERPNext live connector",
+    "regulated data",
+    "electronic signature",
+    "batch release",
+    "final disposition",
+    "compliance guarantee"
+  ]
+}

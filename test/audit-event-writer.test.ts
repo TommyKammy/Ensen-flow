@@ -109,7 +109,7 @@ describe("neutral audit event writer", () => {
         productionEvidenceReady: false,
         protocolSnapshot: {
           name: "ensen-protocol",
-          version: "0.3.0"
+          version: "0.4.0"
         },
         protocolEvidenceProfile: "operational-evidence-profile.v1"
       },
@@ -119,7 +119,7 @@ describe("neutral audit event writer", () => {
           producerMetadata: {
             producer: "ensen-flow",
             producerVersion: "flow.audit-evidence-export.v1",
-            protocolVersion: "0.3.0",
+            protocolVersion: "0.4.0",
             command: "export-audit-evidence",
             boundary: "local-audit-evidence-export",
             createdBy: "ensen-flow"
@@ -354,15 +354,35 @@ describe("neutral audit event writer", () => {
       attempt: 1,
       occurredAt: "2026-04-29T00:00:03.000Z",
       result: {
-        evidenceBundleRef: {
-          schemaVersion: "eip.evidence-bundle-ref.v1",
-          id: "evb_internal_export",
-          correlationId: "corr_manual_export",
-          type: "local_path",
-          uri: "artifacts/evidence/internal/bundle.json",
-          createdAt: "2026-04-29T00:00:03.000Z",
-          dataClassification: "restricted"
-        }
+        evidenceRefs: [
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_internal_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/internal/bundle.json",
+            createdAt: "2026-04-29T00:00:03.000Z",
+            dataClassification: "internal"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_customer_confidential_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/customer-confidential/bundle.json",
+            createdAt: "2026-04-29T00:00:03.000Z",
+            dataClassification: "customer-confidential"
+          },
+          {
+            schemaVersion: "eip.evidence-bundle-ref.v1",
+            id: "evb_regulated_export",
+            correlationId: "corr_manual_export",
+            type: "local_path",
+            uri: "artifacts/evidence/regulated/bundle.json",
+            createdAt: "2026-04-29T00:00:03.000Z",
+            dataClassification: "regulated"
+          }
+        ]
       }
     });
 
@@ -370,9 +390,15 @@ describe("neutral audit event writer", () => {
 
     expect(exported.publicSafe.evidenceRefs).toEqual([]);
     expect(exported.publicSafe.diagnostics).toEqual([
+      "omitted an evidence reference because its data classification is not public-safe",
+      "omitted an evidence reference because its data classification is not public-safe",
       "omitted an evidence reference because its data classification is not public-safe"
     ]);
     expect(JSON.stringify(exported.publicSafe)).not.toContain("evb_internal_export");
+    expect(JSON.stringify(exported.publicSafe)).not.toContain(
+      "evb_customer_confidential_export"
+    );
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("evb_regulated_export");
   });
 
   it("rejects unknown evidence data classifications before writing an export artifact", async () => {

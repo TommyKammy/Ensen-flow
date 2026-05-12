@@ -67,6 +67,10 @@ authority, and no premature compliance claims.
 - `protocol-snapshots/ensen-protocol/v0.3.0/README.md`: copied Protocol
   v0.3.0 operational evidence profile snapshot for X-Gate 3 Track A artifact
   hygiene, with the source release tag and release URL recorded locally.
+- `protocol-snapshots/ensen-protocol/v0.4.0/README.md`: copied Protocol
+  v0.4.0 Track B evidence boundary snapshot for customer / regulated
+  classification and approval/draft-only semantics, with the source release tag
+  and release URL recorded locally.
 
 ## Workflow Definition Schema
 
@@ -148,13 +152,15 @@ type, step attempts, neutral audit event summaries, and any public-safe
 context, idempotency key values, raw local state paths, raw audit paths,
 workstation-local evidence paths, secrets, customer data, production evidence
 locations, and local confidential reference values are not exported into the
-public-safe section. The export boundary uses the copied Protocol v0.3.0
-operational evidence profile vocabulary for public data classification,
-bounded producer metadata, retention hints, checksum presence, and confidential
-reference policy facts without claiming production evidence readiness. `file_uri`
-evidence references are omitted from public-safe exports until Flow adopts a
-deliberately public mapping; portable relative `local_path` references remain
-exportable.
+public-safe section. The export boundary uses the copied Protocol v0.4.0
+operational evidence and Track B classification vocabulary for public data
+classification, bounded producer metadata, retention hints, checksum presence,
+and confidential reference policy facts without claiming production evidence
+readiness or regulated workflow execution. `file_uri` evidence references are
+omitted from public-safe exports until Flow adopts a deliberately public
+mapping; portable relative `local_path` references remain exportable. Internal,
+customer-confidential, regulated, confidential, and restricted evidence
+references stay out of the public-safe export surface.
 
 Workflow artifact hygiene is fail-closed at the local JSONL boundary and at
 public export boundaries. Raw secrets, token-shaped strings, private key blocks,
@@ -209,6 +215,27 @@ Future Protocol profile updates should be adopted by adding a new versioned
 snapshot directory from a tagged Ensen-protocol release, recording the release
 tag and release URL in that directory's manifest, and updating this navigation
 without pointing Flow runtime code or tests at a sibling checkout.
+
+The copied Ensen-protocol v0.4.0 Track B evidence boundary snapshot is
+documented in `protocol-snapshots/ensen-protocol/v0.4.0/README.md`, with the
+classification guide at
+`protocol-snapshots/ensen-protocol/v0.4.0/docs/data-classification.md`, the
+customer / regulated profile at
+`protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/customer-regulated-data-classification-profile.md`,
+the approval and draft-only profile at
+`protocol-snapshots/ensen-protocol/v0.4.0/docs/integration/approval-and-draft-evidence-semantics.md`,
+and public-safe examples under
+`protocol-snapshots/ensen-protocol/v0.4.0/fixtures/`. It records source release
+tag `v0.4.0`, release URL
+`https://github.com/TommyKammy/Ensen-protocol/releases/tag/v0.4.0`, and target
+commit `f6c3c5bee2574c8660f6954fe58a9e7625daad12`.
+
+This v0.4.0 intake is protocol contract/reference data only. It does not add
+ERPNext live connector behavior, production regulated workflow execution,
+customer-data fixtures, credential handling, electronic signatures, batch
+release, final disposition, a validated system, or compliance claims. Flow uses
+the Track B classification values only at explicit evidence-boundary surfaces
+such as public-safe audit/evidence export filtering.
 
 ## Local Sequential Runner
 

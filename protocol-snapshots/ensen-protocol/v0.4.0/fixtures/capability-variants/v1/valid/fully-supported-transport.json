@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "eip.capability-variant.example.v1",
+  "variant": "fully-supported-transport",
+  "description": "supported capability variant example for a synthetic executor boundary that advertises every Phase 3 operation.",
+  "protocolSnapshot": {
+    "tag": "v0.1.0",
+    "commit": "43fa3e7",
+    "issue": "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+  },
+  "runtimeBoundary": "none",
+  "boundaryRef": "<executor-boundary>",
+  "artifactRefs": [
+    "fixtures/run-request/v1/valid/github-issue-request.json",
+    "fixtures/run-status/v1/valid/running-snapshot.json",
+    "fixtures/run-status/v1/valid/completed-snapshot.json",
+    "fixtures/run-result/v1/valid/succeeded-result.json",
+    "fixtures/evidence-bundle-ref/v1/valid/file-uri.json"
+  ],
+  "capabilitySummary": {
+    "submit": "required baseline",
+    "status": "optional",
+    "cancel": "optional",
+    "fetchEvidence": "optional",
+    "polling support": "optional",
+    "evidence reference support": "optional",
+    "idempotency expectation": "required baseline"
+  },
+  "expectedConformance": [
+    "submit accepts a RunRequest only at a trusted executor boundary",
+    "polling reads RunStatusSnapshot observations from the authoritative run binding",
+    "terminal handoff retrieves RunResult instead of synthesizing it from polling text",
+    "EvidenceBundleRef remains a reference and does not embed evidence payloads"
+  ],
+  "conformanceUse": "Loop and Flow consumers can use this example as the fully supported comparison row when checking copied Phase 3 fixtures."
+}

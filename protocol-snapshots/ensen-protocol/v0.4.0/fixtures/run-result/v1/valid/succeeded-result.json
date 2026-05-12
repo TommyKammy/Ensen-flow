@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "eip.run-result.v1",
+  "id": "run_01HV9ZX8J2K6T3QW4R5Y7M8N9P",
+  "requestId": "req_01HV7Y8M8F2KQ5W3P9R6T4N2AB",
+  "correlationId": "corr_01HV7Y8M8F2KQ5W3P9R6T4N2AC",
+  "status": "succeeded",
+  "completedAt": "2026-04-29T02:30:00Z",
+  "changeRequests": [
+    {
+      "changeRequestId": "cr_01HV9ZX8J2K6T3QW4R5Y7M8N9Q",
+      "status": "open"
+    }
+  ],
+  "evidenceBundles": [
+    {
+      "evidenceBundleId": "evb_01HV9ZX8J2K6T3QW4R5Y7M8N9R",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "verification": {
+    "status": "passed",
+    "commands": [
+      {
+        "command": "npm test",
+        "status": "passed",
+        "completedAt": "2026-04-29T02:29:45Z",
+        "summary": "Contract tests passed."
+      }
+    ],
+    "summary": "Run completed and verification passed."
+  },
+  "metrics": {
+    "durationMs": 180000,
+    "attempts": 1,
+    "tokensInput": 2400,
+    "tokensOutput": 900
+  },
+  "extensions": {
+    "x-fixture-note": "synthetic succeeded result"
+  }
+}

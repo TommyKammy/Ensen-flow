@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "eip.capability-variant.example.v1",
+  "variant": "evidence-unavailable",
+  "description": "evidence unavailable example for a synthetic boundary that can finish a run while evidence retrieval is absent or inaccessible.",
+  "protocolSnapshot": {
+    "tag": "v0.1.0",
+    "commit": "43fa3e7",
+    "issue": "https://github.com/TommyKammy/Ensen-protocol/issues/43"
+  },
+  "runtimeBoundary": "none",
+  "boundaryRef": "<executor-boundary>",
+  "artifactRefs": [
+    "fixtures/run-result/v1/valid/blocked-result.json",
+    "fixtures/evidence-bundle-ref/v1/valid/local-path.json"
+  ],
+  "capabilitySummary": {
+    "submit": "required baseline",
+    "status": "optional",
+    "cancel": "optional",
+    "fetchEvidence": "unsupported",
+    "polling support": "optional",
+    "evidence reference support": "partial",
+    "idempotency expectation": "required baseline"
+  },
+  "expectedConformance": [
+    "required evidence that is absent, expired, unauthorized, or outside supported roots keeps the handoff blocked",
+    "evidence absence must not change the authoritative run status by itself",
+    "examples preserve placeholders such as <evidence-root> instead of local workstation paths"
+  ],
+  "conformanceUse": "Loop and Flow consumers can use this example to keep evidence retrieval absence separate from runtime execution success."
+}

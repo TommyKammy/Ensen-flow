@@ -42,6 +42,7 @@ export interface RunWorkflowInput {
   runId?: string;
   triggerContext?: Record<string, unknown>;
   existingRunStateGuard?: (existingState: WorkflowRunState) => void;
+  existingRunStateArtifactHygiene?: "enforce" | "skip";
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
 }
@@ -105,7 +106,10 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           run: { id: runId }
         });
 
-  const existingState = await readExistingRunState(input.statePath);
+  const existingState = await readExistingRunState(
+    input.statePath,
+    input.existingRunStateArtifactHygiene
+  );
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
     assertPersistedRunCustomerWorkflowAllowlisted(existingState, input.definition);
@@ -139,7 +143,10 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         throw error;
       }
 
-      const competingState = await readCompetingRunState(input.statePath);
+      const competingState = await readCompetingRunState(
+        input.statePath,
+        input.existingRunStateArtifactHygiene
+      );
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
       assertPersistedRunCustomerWorkflowAllowlisted(competingState, input.definition);
       assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
@@ -479,9 +486,12 @@ const defaultWorkflowStepHandler: WorkflowStepHandler = ({ step }) => {
   }
 };
 
-const readExistingRunState = async (statePath: string): Promise<WorkflowRunState | undefined> => {
+const readExistingRunState = async (
+  statePath: string,
+  artifactHygiene: "enforce" | "skip" = "enforce"
+): Promise<WorkflowRunState | undefined> => {
   try {
-    return await readWorkflowRunState(statePath);
+    return await readWorkflowRunState(statePath, { artifactHygiene });
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return undefined;
@@ -491,11 +501,14 @@ const readExistingRunState = async (statePath: string): Promise<WorkflowRunState
   }
 };
 
-const readCompetingRunState = async (statePath: string): Promise<WorkflowRunState> => {
+const readCompetingRunState = async (
+  statePath: string,
+  artifactHygiene: "enforce" | "skip" = "enforce"
+): Promise<WorkflowRunState> => {
   const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await readWorkflowRunState(statePath);
+      return await readWorkflowRunState(statePath, { artifactHygiene });
     } catch (error) {
       if (!isTransientRunCreationRead(error) || attempt === maxAttempts) {
         throw error;
@@ -504,7 +517,7 @@ const readCompetingRunState = async (statePath: string): Promise<WorkflowRunStat
     }
   }
 
-  return readWorkflowRunState(statePath);
+  return readWorkflowRunState(statePath, { artifactHygiene });
 };
 
 const isTransientRunCreationRead = (error: unknown): boolean =>

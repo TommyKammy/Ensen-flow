@@ -65,6 +65,14 @@ export const findUnsafeWorkflowArtifactValue = (
   path: string
 ): UnsafeWorkflowArtifactFinding | undefined => {
   if (typeof value === "string") {
+    const parsed = parseJsonFormattedContainer(value);
+    if (parsed !== undefined) {
+      const nested = findUnsafeWorkflowArtifactValue(parsed, path);
+      if (nested !== undefined) {
+        return nested;
+      }
+    }
+
     const category = classifyUnsafeWorkflowArtifactString(value);
     return category === undefined ? undefined : { path, category };
   }
@@ -146,6 +154,12 @@ const classifyUnsafeWorkflowArtifactKey = (
       : "credential";
   }
 
+  if (isCredentialBearingKey(normalized)) {
+    return normalized.includes("cookie") || normalized.includes("session")
+      ? "session-cookie"
+      : "credential";
+  }
+
   if (REGULATED_FIELD_KEYS.has(normalized)) {
     return "regulated-content";
   }
@@ -159,6 +173,35 @@ const classifyUnsafeWorkflowArtifactKey = (
 
 const normalizeArtifactKey = (key: string): string =>
   key.replaceAll(/[^A-Za-z0-9]/gu, "").toLowerCase();
+
+const isCredentialBearingKey = (normalizedKey: string): boolean =>
+  [
+    "authorization",
+    "password",
+    "passwd",
+    "secret",
+    "apikey",
+    "accesskey",
+    "privatekey",
+    "credential",
+    "token",
+    "sessioncookie",
+    "sessionid"
+  ].some((token) => normalizedKey.includes(token));
+
+const parseJsonFormattedContainer = (value: string): unknown[] | Record<string, unknown> | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return Array.isArray(parsed) || isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 const isEmptyPublicPlaceholder = (value: unknown): boolean =>
   value === undefined ||

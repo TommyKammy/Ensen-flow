@@ -217,6 +217,10 @@ export interface WorkflowRunState {
   stepAttempts: Record<string, WorkflowStepAttemptState[]>;
 }
 
+export interface ReadWorkflowRunStateOptions {
+  artifactHygiene?: "enforce" | "skip";
+}
+
 export type WorkflowStepAttemptResultMetadata = Record<string, unknown>;
 
 export type WorkflowRunRecoveryClassification =
@@ -330,10 +334,11 @@ export const appendWorkflowRunEvent = async (
 };
 
 export const readWorkflowRunState = async (
-  statePath: string
+  statePath: string,
+  options?: ReadWorkflowRunStateOptions
 ): Promise<WorkflowRunState> => {
   const contents = await readFile(statePath, "utf8");
-  const events = parseWorkflowRunEvents(contents);
+  const events = parseWorkflowRunEvents(contents, options);
 
   return projectWorkflowRunEvents(events);
 };
@@ -531,7 +536,10 @@ const projectWorkflowRunEvents = (events: WorkflowRunEvent[]): WorkflowRunState 
   };
 };
 
-const parseWorkflowRunEvents = (contents: string): WorkflowRunEvent[] => {
+const parseWorkflowRunEvents = (
+  contents: string,
+  options?: ReadWorkflowRunStateOptions
+): WorkflowRunEvent[] => {
   const lines = contents.split("\n");
   if (lines.at(-1) === "") {
     lines.pop();
@@ -551,7 +559,7 @@ const parseWorkflowRunEvents = (contents: string): WorkflowRunEvent[] => {
       throw new Error(`workflow run state line ${lineNumber}: invalid JSON: ${message}`);
     }
 
-    return validateWorkflowRunEvent(parsed, lineNumber);
+    return validateWorkflowRunEvent(parsed, lineNumber, options);
   });
 };
 
@@ -654,7 +662,8 @@ const stepAttemptStatusFromFailedEvent = (
 
 const validateWorkflowRunEvent = (
   value: unknown,
-  lineNumber: number
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
 ): WorkflowRunEvent => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "record must be an object");
@@ -674,7 +683,7 @@ const validateWorkflowRunEvent = (
     requireNonEmptyString(value, "workflowId", lineNumber);
     requireNonEmptyString(value, "workflowVersion", lineNumber);
     requireTimestamp(value, "occurredAt", lineNumber);
-    validateTrigger(value.trigger, lineNumber);
+    validateTrigger(value.trigger, lineNumber, options);
     return value as unknown as WorkflowRunCreatedEvent;
   }
 
@@ -691,7 +700,7 @@ const validateWorkflowRunEvent = (
     }
 
     if ("recovery" in value) {
-      validateRecoveryDecisionMetadata(value.recovery, lineNumber);
+      validateRecoveryDecisionMetadata(value.recovery, lineNumber, options);
     }
 
     return value as unknown as WorkflowRunCompletedEvent;
@@ -704,24 +713,28 @@ const validateWorkflowRunEvent = (
   requireTimestamp(value, "occurredAt", lineNumber);
 
   if ("retry" in value) {
-    validateRetryMetadata(value.retry, lineNumber);
+    validateRetryMetadata(value.retry, lineNumber, options);
   }
 
   if ("result" in value) {
     if (eventType === "step.attempt.started") {
       throw stateError(lineNumber, "result is only allowed on terminal step attempt events");
     }
-    validateResultMetadata(value.result, lineNumber);
+    validateResultMetadata(value.result, lineNumber, options);
   }
 
   if ("recovery" in value) {
-    validateRecoveryDecisionMetadata(value.recovery, lineNumber);
+    validateRecoveryDecisionMetadata(value.recovery, lineNumber, options);
   }
 
   return value as unknown as WorkflowStepAttemptEvent;
 };
 
-const validateTrigger = (value: unknown, lineNumber: number): void => {
+const validateTrigger = (
+  value: unknown,
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
+): void => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "trigger must be an object");
   }
@@ -736,15 +749,24 @@ const validateTrigger = (value: unknown, lineNumber: number): void => {
 
   if ("context" in value) {
     validateJsonSerializableValue(value.context, lineNumber, "trigger.context");
-    rejectUnsafeWorkflowArtifactValues(value.context, lineNumber, "trigger.context");
+    rejectUnsafeWorkflowArtifactValues(
+      value.context,
+      lineNumber,
+      "trigger.context",
+      options
+    );
   }
 
   if ("idempotencyKey" in value) {
-    validateIdempotencyMetadata(value.idempotencyKey, lineNumber);
+    validateIdempotencyMetadata(value.idempotencyKey, lineNumber, options);
   }
 };
 
-const validateIdempotencyMetadata = (value: unknown, lineNumber: number): void => {
+const validateIdempotencyMetadata = (
+  value: unknown,
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
+): void => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "trigger.idempotencyKey must be an object");
   }
@@ -759,10 +781,14 @@ const validateIdempotencyMetadata = (value: unknown, lineNumber: number): void =
   }
 
   requireNonEmptyString(value, "key", lineNumber);
-  rejectUnsafeWorkflowArtifactValues(value.key, lineNumber, "idempotencyKey.key");
+  rejectUnsafeWorkflowArtifactValues(value.key, lineNumber, "idempotencyKey.key", options);
 };
 
-const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
+const validateRetryMetadata = (
+  value: unknown,
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
+): void => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "retry must be an object");
   }
@@ -782,11 +808,15 @@ const validateRetryMetadata = (value: unknown, lineNumber: number): void => {
   }
 
   if ("reason" in value) {
-    rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "retry.reason");
+    rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "retry.reason", options);
   }
 };
 
-const validateRecoveryDecisionMetadata = (value: unknown, lineNumber: number): void => {
+const validateRecoveryDecisionMetadata = (
+  value: unknown,
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
+): void => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "recovery must be an object");
   }
@@ -807,16 +837,20 @@ const validateRecoveryDecisionMetadata = (value: unknown, lineNumber: number): v
   }
 
   requireNonEmptyString(value, "reason", lineNumber);
-  rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "recovery.reason");
+  rejectUnsafeWorkflowArtifactValues(value.reason, lineNumber, "recovery.reason", options);
 };
 
-const validateResultMetadata = (value: unknown, lineNumber: number): void => {
+const validateResultMetadata = (
+  value: unknown,
+  lineNumber: number,
+  options?: ReadWorkflowRunStateOptions
+): void => {
   if (!isRecord(value)) {
     throw stateError(lineNumber, "result must be an object");
   }
 
   validateJsonSerializableValue(value, lineNumber, "result");
-  rejectUnsafeWorkflowArtifactValues(value, lineNumber, "result");
+  rejectUnsafeWorkflowArtifactValues(value, lineNumber, "result", options);
 };
 
 const rejectUnknownKeys = (
@@ -992,8 +1026,13 @@ const validateJsonSerializableValue = (
 const rejectUnsafeWorkflowArtifactValues = (
   value: unknown,
   lineNumber: number,
-  path: string
+  path: string,
+  options?: ReadWorkflowRunStateOptions
 ): void => {
+  if (options?.artifactHygiene === "skip") {
+    return;
+  }
+
   const finding = findUnsafeWorkflowArtifactValue(value, path);
   if (finding !== undefined) {
     throw stateError(lineNumber, formatUnsafeWorkflowArtifactDiagnostic(finding));

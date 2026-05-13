@@ -227,6 +227,10 @@ export const createLocalFileConnector = (
           })
         });
       } catch (error) {
+        if (isLocalFileInvalidRequestError(error)) {
+          return invalidRequest(connectorId, error.message);
+        }
+
         if (!isLocalFileExecutionError(error)) {
           throw error;
         }
@@ -287,6 +291,11 @@ const createLocalFileReceipt = async (input: {
   request: LocalFileSubmitRequest;
   resolved: ResolvedLocalFileRequest;
 }): Promise<LocalFileReceipt> => {
+  const unsafeContent = validateLocalFileContent(input.request);
+  if (unsafeContent !== undefined) {
+    throw new LocalFileInvalidRequestError(unsafeContent);
+  }
+
   const outcome = await executeFileRequest(input.resolved);
   if (!outcome.ok) {
     throw new LocalFileExecutionError(outcome.message, outcome.retryable);
@@ -416,17 +425,21 @@ const validateSubmitRequest = (request: LocalFileSubmitRequest): string | undefi
     return "local file read request must not include content";
   }
 
-  if (request.file.content !== undefined) {
-    const unsafeContent = findUnsafeWorkflowArtifactValue(
-      request.file.content,
-      "local file content"
-    );
-    if (unsafeContent !== undefined) {
-      return formatUnsafeWorkflowArtifactDiagnostic(unsafeContent);
-    }
+  return undefined;
+};
+
+const validateLocalFileContent = (request: LocalFileSubmitRequest): string | undefined => {
+  if (request.file.content === undefined) {
+    return undefined;
   }
 
-  return undefined;
+  const unsafeContent = findUnsafeWorkflowArtifactValue(
+    request.file.content,
+    "local file content"
+  );
+  return unsafeContent === undefined
+    ? undefined
+    : formatUnsafeWorkflowArtifactDiagnostic(unsafeContent);
 };
 
 const resolveLocalFileRequest = async (
@@ -581,6 +594,16 @@ class LocalFileExecutionError extends Error {
 
 const isLocalFileExecutionError = (error: unknown): error is LocalFileExecutionError =>
   error instanceof LocalFileExecutionError;
+
+class LocalFileInvalidRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalFileInvalidRequestError";
+  }
+}
+
+const isLocalFileInvalidRequestError = (error: unknown): error is LocalFileInvalidRequestError =>
+  error instanceof LocalFileInvalidRequestError;
 
 const fingerprintFileRequest = (
   request: LocalFileSubmitRequest,

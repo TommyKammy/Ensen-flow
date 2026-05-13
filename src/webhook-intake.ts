@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { WorkflowRunState } from "./workflow-run-state.js";
+import { readWorkflowRunState } from "./workflow-run-state.js";
 import { validateWorkflowDefinition } from "./workflow-definition.js";
 import type { WorkflowDefinition } from "./workflow-definition.js";
 import { runWorkflow } from "./workflow-runner.js";
@@ -91,6 +92,14 @@ export const consumeWebhookInput = async (
   const statePath = join(options.stateRoot, `${runId}.jsonl`);
   const inputFingerprint = createWebhookInputFingerprint(normalizedInput);
 
+  const existingState = await readExistingWebhookRunState(statePath);
+  if (existingState !== undefined) {
+    assertWebhookInputMatchesState(existingState, inputFingerprint);
+  } else {
+    rejectCredentialShapedKeys(normalizedInput.payload, "webhook input payload");
+    rejectUnsafeWebhookArtifactValues(normalizedInput.payload, "webhook input payload");
+  }
+
   return runWorkflow({
     definition,
     statePath,
@@ -106,6 +115,7 @@ export const consumeWebhookInput = async (
         payload: normalizedInput.payload
       }
     },
+    existingRunStateArtifactHygiene: "skip",
     existingRunStateGuard: (existingState) =>
       assertWebhookInputMatchesState(existingState, inputFingerprint),
     now: options.now,
@@ -179,8 +189,6 @@ const normalizeWebhookInput = (value: unknown, expectedPath: string): WebhookInp
     throw new WebhookIntakeRejectedError("webhook input payload must be an object");
   }
   validateBoundedJson(value.payload, "webhook input payload", 0);
-  rejectCredentialShapedKeys(value.payload, "webhook input payload");
-  rejectUnsafeWebhookArtifactValues(value.payload, "webhook input payload");
 
   return {
     schemaVersion: WEBHOOK_INPUT_SCHEMA_VERSION,
@@ -314,6 +322,20 @@ const rejectUnsafeWebhookArtifactValues = (value: unknown, path: string): void =
   }
 };
 
+const readExistingWebhookRunState = async (
+  statePath: string
+): Promise<WorkflowRunState | undefined> => {
+  try {
+    return await readWorkflowRunState(statePath, { artifactHygiene: "skip" });
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+
+    throw error;
+  }
+};
+
 const assertWebhookInputMatchesState = (
   existingState: WorkflowRunState,
   inputFingerprint: string
@@ -439,3 +461,6 @@ const isStrictUtcMillisTimestamp = (value: string): boolean => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;

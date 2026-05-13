@@ -57,6 +57,10 @@ authority, and no premature compliance claims.
   JSONL state recovery, approval/retry/idempotency recovery, notification
   misfire and webhook replay handling, and cleanup boundaries that preserve
   audit/evidence history.
+- `docs/customer-workflow-rollback-evidence-retention-runbook.md`: Track B
+  customer workflow rollback, revocation, supersession, evidence retention,
+  audit export, notification recovery, draft artifact recovery, workflow state
+  recovery, and cleanup boundaries for fake, read-only, and draft-only contexts.
 - `docs/x-gate3-track-a-flow-closure.md`: Flow-side X-Gate 3 Track A closure
   review with completed issue/PR evidence, Flow commit snapshot, Protocol
   `v0.3.0` release evidence, verification commands, and remaining non-Flow

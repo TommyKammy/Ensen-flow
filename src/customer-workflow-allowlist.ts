@@ -65,21 +65,24 @@ export const assertCustomerWorkflowAllowlisted = (input: {
   }
 
   const policy = resolveCustomerWorkflowAllowlistPolicy(input.definition);
-  const policyEntry = policy?.entries.find(
+  const matchingEntries = policy?.entries.filter(
     (entry) =>
       entry.customerWorkflowRef === customerWorkflow.ref &&
       entry.modes.includes(customerWorkflow.mode)
   );
 
-  if (policyEntry === undefined) {
+  if (matchingEntries === undefined || matchingEntries.length === 0) {
     throw new Error(
       `customer workflow input is not allowlisted for mode ${customerWorkflow.mode}; diagnostic redacted`
     );
   }
 
+  const erpNextReference = meaningfulErpNextReference(customerWorkflow.erpNext);
   if (
-    customerWorkflow.erpNext !== undefined &&
-    !erpNextReferenceMatchesPolicy(customerWorkflow.erpNext, policyEntry.erpNext)
+    erpNextReference !== undefined &&
+    !matchingEntries.some((entry) =>
+      erpNextReferenceMatchesPolicy(erpNextReference, entry.erpNext)
+    )
   ) {
     throw new Error(
       `ERPNext reference is not allowlisted for mode ${customerWorkflow.mode}; diagnostic redacted`
@@ -171,6 +174,24 @@ const erpNextReferenceMatchesPolicy = (
     stringFieldMatches(reference.objectType, allowlist.objectTypes) &&
     stringFieldMatches(reference.endpointRef, allowlist.endpointRefs)
   );
+};
+
+const meaningfulErpNextReference = (
+  reference: CustomerWorkflowErpNextReference | undefined
+): CustomerWorkflowErpNextReference | undefined => {
+  if (reference === undefined) {
+    return undefined;
+  }
+
+  if (
+    reference.siteRef === undefined &&
+    reference.objectType === undefined &&
+    reference.endpointRef === undefined
+  ) {
+    return undefined;
+  }
+
+  return reference;
 };
 
 const stringFieldMatches = (

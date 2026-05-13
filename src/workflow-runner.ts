@@ -112,6 +112,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const existingState = await readExistingRunState(input.statePath);
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
+    assertExistingRunCustomerWorkflowAllowlisted(existingState, input.definition);
     input.existingRunStateGuard?.(existingState);
     if (existingState.run.terminalState !== undefined) {
       return existingState;
@@ -142,6 +143,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
       const competingState = await readCompetingRunState(input.statePath);
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
+      assertExistingRunCustomerWorkflowAllowlisted(competingState, input.definition);
       input.existingRunStateGuard?.(competingState);
       if (competingState.run.terminalState !== undefined) {
         return competingState;
@@ -528,6 +530,16 @@ const assertExistingRunMatches = (
   if (existingState.run.runId !== runId) {
     throw new Error("existing workflow run state has a different runId");
   }
+};
+
+const assertExistingRunCustomerWorkflowAllowlisted = (
+  existingState: WorkflowRunState,
+  definition: WorkflowDefinition
+): void => {
+  assertCustomerWorkflowAllowlisted({
+    definition,
+    triggerContext: existingState.run.trigger.context ?? {}
+  });
 };
 
 const assertExistingRunRecoverable = (

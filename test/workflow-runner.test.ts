@@ -437,6 +437,90 @@ describe("sequential workflow runner", () => {
     expect(result.run.status).toBe("succeeded");
   });
 
+  it("treats an empty ERPNext reference as absent customer workflow input", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const policy: CustomerWorkflowAllowlistPolicy = {
+      schemaVersion: "flow.customer-workflow-allowlist.v1",
+      entries: [
+        {
+          customerWorkflowRef: "public-release-approval",
+          modes: ["draft-only"]
+        }
+      ]
+    };
+    definition.metadata = {
+      ...definition.metadata,
+      customerWorkflowAllowlist: policy
+    };
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-customer-workflow-empty-erpnext",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {}
+        }
+      }
+    });
+
+    expect(result.run.status).toBe("succeeded");
+  });
+
+  it("checks all matching allowlist entries before rejecting an ERPNext reference", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const policy: CustomerWorkflowAllowlistPolicy = {
+      schemaVersion: "flow.customer-workflow-allowlist.v1",
+      entries: [
+        {
+          customerWorkflowRef: "public-release-approval",
+          modes: ["draft-only"],
+          erpNext: {
+            siteRefs: ["erpnext-other-demo"],
+            objectTypes: ["Sales Order"],
+            endpointRefs: ["erpnext-other-api"]
+          }
+        },
+        {
+          customerWorkflowRef: "public-release-approval",
+          modes: ["draft-only"],
+          erpNext: {
+            siteRefs: ["erpnext-public-demo"],
+            objectTypes: ["Sales Order"],
+            endpointRefs: ["erpnext-public-api"]
+          }
+        }
+      ]
+    };
+    definition.metadata = {
+      ...definition.metadata,
+      customerWorkflowAllowlist: policy
+    };
+    const statePath = await createTempStatePath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "manual-customer-workflow-later-entry",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      }
+    });
+
+    expect(result.run.status).toBe("succeeded");
+  });
+
   it("redacts unsafe customer workflow and ERPNext values from allowlist miss diagnostics", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     definition.metadata = {
@@ -485,6 +569,67 @@ describe("sequential workflow runner", () => {
     );
 
     await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("validates persisted customer workflow trigger context before recovery writes", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    delete definition.trigger.idempotencyKey;
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let stepHandlerCalled = false;
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-local-run",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-05-13T00:10:00.000Z",
+        context: {
+          customerWorkflow: {
+            ref: "customer-workflow-private-placeholder",
+            mode: "draft-only"
+          }
+        }
+      },
+      createdAt: "2026-05-13T00:10:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-local-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-05-13T00:10:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-local-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-05-13T00:10:03.000Z"
+    });
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow(
+      "customer workflow input is not allowlisted for mode draft-only; diagnostic redacted"
+    );
+
+    expect(stepHandlerCalled).toBe(false);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed"
+    ]);
     await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 

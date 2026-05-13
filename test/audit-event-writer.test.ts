@@ -456,7 +456,7 @@ describe("neutral audit event writer", () => {
     await expect(readFile(outputPath, "utf8")).rejects.toThrow();
   });
 
-  it("rejects missing evidence data classifications before writing an export artifact", async () => {
+  it("omits missing evidence data classifications from public-safe exports", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     const exportRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot, exportRoot);
@@ -499,10 +499,18 @@ describe("neutral audit event writer", () => {
       }
     });
 
-    await expect(createAuditEvidenceExport({ statePath, outputPath })).rejects.toThrow(
-      "evidence ref evb_missing_classification_export is missing required dataClassification"
+    const exported = await createAuditEvidenceExport({ statePath, outputPath });
+
+    expect(exported.publicSafe.evidenceRefs).toEqual([]);
+    expect(exported.publicSafe.diagnostics).toEqual([
+      "omitted an evidence reference because its data classification is missing"
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain(
+      "evb_missing_classification_export"
     );
-    await expect(readFile(outputPath, "utf8")).rejects.toThrow();
+    await expect(readFile(outputPath, "utf8")).resolves.toContain(
+      "omitted an evidence reference because its data classification is missing"
+    );
   });
 
   it("rejects extra export-audit-evidence CLI arguments", async () => {

@@ -157,9 +157,10 @@ operational evidence and Track B classification vocabulary for public data
 classification, bounded producer metadata, retention hints, checksum presence,
 and confidential reference policy facts without claiming production evidence
 readiness or regulated workflow execution. Track B evidence references must
-carry an explicit `dataClassification`; missing or unknown values fail closed
-before an export artifact is written. `file_uri` evidence references are omitted
-from public-safe exports until Flow adopts a deliberately public mapping;
+carry an explicit `dataClassification` before entering public-safe output;
+missing values are omitted as unclassified references, and unknown values fail
+closed before an export artifact is written. `file_uri` evidence references are
+omitted from public-safe exports until Flow adopts a deliberately public mapping;
 portable relative `local_path` references remain exportable only when they are
 explicitly classified as `public`. Internal, customer-confidential, regulated,
 confidential, and restricted evidence references stay out of the public-safe

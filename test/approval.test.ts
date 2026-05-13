@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createWorkflowRun,
   inspectWorkflowRunRecovery,
   readWorkflowRunState,
   runWorkflow
@@ -29,6 +30,632 @@ afterEach(async () => {
 });
 
 describe("approval recovery model", () => {
+  it("fails closed for committed customer workflow artifacts in draft-only mode without explicit human approval", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/draft-only.jsonl");
+    const auditPath = await createTempPath("ensen-flow-approval-audit-", "audit/draft-only.jsonl");
+    let stepHandlerCalled = false;
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "draft-only-committed-without-approval",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () => {
+        stepHandlerCalled = true;
+        return {
+          requestId: "req_draft_only_commit_without_approval",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:00:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "Draft artifact was treated as committed.",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "committed",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        } satisfies ExecutorConnectorStatusSnapshot;
+      }
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "draft-only customer workflow artifacts cannot be committed without explicit human approval"
+        }
+      }
+    ]);
+    expect(stepHandlerCalled).toBe(true);
+    const stateJsonl = await readFile(statePath, "utf8");
+    expect(stateJsonl).toContain("\"step.attempt.started\"");
+    expect(stateJsonl).toContain("\"step.attempt.failed\"");
+    expect(stateJsonl).not.toContain("\"step.attempt.completed\"");
+    expect(stateJsonl).not.toContain("customerWorkflowArtifact");
+    const auditJsonl = await readFile(auditPath, "utf8");
+    expect(auditJsonl).toContain(
+      "draft-only customer workflow artifacts cannot be committed without explicit human approval"
+    );
+    expect(auditJsonl).not.toContain("\"step.completed\"");
+  });
+
+  it("allows read-only customer workflow observation without creating draft or committed artifacts", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/read-only.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "read-only-observation",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "read-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_read_only_observation",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:01:00.000Z",
+          result: {
+            status: "succeeded",
+            summary: "Read-only observation recorded.",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "observation",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.stepAttempts["draft-action"][0]?.result).toMatchObject({
+      executor: {
+        result: {
+          output: {
+            customerWorkflowArtifact: {
+              artifactIntent: "observation",
+              externalApplicationState: "not-applied"
+            }
+          }
+        }
+      }
+    });
+  });
+
+  it("fails closed when read-only customer workflow mode creates a draft-only artifact", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/read-only-draft.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "read-only-draft",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "read-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_read_only_draft",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:02:00.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "read-only customer workflow mode cannot create draft-only or committed artifacts"
+    );
+  });
+
+  it("fails closed when read-only customer workflow mode records approval lifecycle state", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/read-only-approval.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "read-only-approval",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "read-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_read_only_approval",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:02:30.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "observation",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "read-only customer workflow mode cannot record approval lifecycle states"
+    );
+  });
+
+  it("records draft-only approval-required artifacts without treating them as committed", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/draft-required.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "draft-required",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_draft_required",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:03:00.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied",
+                decisionBoundary: "<approval-boundary>"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(result.stepAttempts["draft-action"][0]?.result).toMatchObject({
+      executor: {
+        result: {
+          output: {
+            customerWorkflowArtifact: {
+              artifactIntent: "draft-only",
+              approvalState: "approval-required",
+              externalApplicationState: "not-applied"
+            }
+          }
+        }
+      }
+    });
+  });
+
+  it("fails closed when draft-only artifacts omit approvalState", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/draft-missing-state.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "draft-missing-state",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_draft_missing_state",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:03:15.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "draft-only customer workflow artifacts require an explicit lifecycle approvalState before approval"
+    );
+  });
+
+  it("fails closed for malformed non-string approvalState values", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/draft-malformed-state.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "draft-malformed-state",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_draft_malformed_state",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:03:20.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                approvalState: false,
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "customer workflow artifact approvalState must be a string"
+    );
+  });
+
+  it.each([
+    {
+      requestId: "draft-missing-application-state",
+      artifact: {
+        artifactIntent: "draft-only",
+        approvalState: "approval-required"
+      }
+    },
+    {
+      requestId: "draft-pending-application-state",
+      artifact: {
+        artifactIntent: "draft-only",
+        approvalState: "approval-required",
+        externalApplicationState: "pending"
+      }
+    }
+  ] as const)(
+    "fails closed for $requestId artifacts without not-applied state",
+    async ({ requestId, artifact }) => {
+      const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+      const statePath = await createTempPath("ensen-flow-approval-", `runs/${requestId}.jsonl`);
+
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId,
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-public-demo",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-public-api"
+            }
+          }
+        },
+        stepHandler: () =>
+          ({
+            requestId: `req_${requestId.replaceAll("-", "_")}`,
+            status: "succeeded",
+            observedAt: "2026-05-13T01:03:30.000Z",
+            result: {
+              status: "succeeded",
+              output: {
+                customerWorkflowArtifact: artifact
+              }
+            }
+          }) satisfies ExecutorConnectorStatusSnapshot
+      });
+
+      expect(result.run.status).toBe("failed");
+      expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+        "customer workflow artifacts must remain not-applied in read-only or draft-only mode"
+      );
+    }
+  );
+
+  it.each(["rejected", "revoked", "superseded"] as const)(
+    "records draft-only %s artifacts as distinguishable not-applied evidence",
+    async (approvalState) => {
+      const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+      const statePath = await createTempPath(
+        "ensen-flow-approval-",
+        `runs/draft-${approvalState}.jsonl`
+      );
+
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId: `draft-${approvalState}`,
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-public-demo",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-public-api"
+            }
+          }
+        },
+        stepHandler: () =>
+          ({
+            requestId: `req_draft_${approvalState}`,
+            status: "succeeded",
+            observedAt: "2026-05-13T01:04:00.000Z",
+            result: {
+              status: "succeeded",
+              output: {
+                customerWorkflowArtifact: {
+                  artifactIntent: "draft-only",
+                  approvalState,
+                  externalApplicationState: "not-applied",
+                  decisionBoundary: "<approval-boundary>",
+                  ...(approvalState === "superseded"
+                    ? { supersedesRef: "draft-action-previous" }
+                    : {})
+                }
+              }
+            }
+          }) satisfies ExecutorConnectorStatusSnapshot
+      });
+
+      expect(result.run.status).toBe("succeeded");
+      expect(result.stepAttempts["draft-action"][0]?.result).toMatchObject({
+        executor: {
+          result: {
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                approvalState,
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }
+      });
+    }
+  );
+
+  it.each([
+    {
+      requestId: "malformed-single-artifact",
+      output: {
+        customerWorkflowArtifact: "draft-only"
+      },
+      expectedReason: "customer workflow artifact must be an object"
+    },
+    {
+      requestId: "malformed-artifact-array",
+      output: {
+        customerWorkflowArtifacts: [
+          {
+            artifactIntent: "draft-only",
+            approvalState: "approval-required",
+            externalApplicationState: "not-applied"
+          },
+          "draft-only"
+        ]
+      },
+      expectedReason: "customer workflow artifacts must be an array of objects"
+    }
+  ] as const)(
+    "fails closed for $requestId customer workflow payloads",
+    async ({ requestId, output, expectedReason }) => {
+      const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+      const statePath = await createTempPath("ensen-flow-approval-", `runs/${requestId}.jsonl`);
+
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId,
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-public-demo",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-public-api"
+            }
+          }
+        },
+        stepHandler: () =>
+          ({
+            requestId: `req_${requestId.replaceAll("-", "_")}`,
+            status: "succeeded",
+            observedAt: "2026-05-13T01:04:30.000Z",
+            result: {
+              status: "succeeded",
+              output
+            }
+          }) satisfies ExecutorConnectorStatusSnapshot
+      });
+
+      expect(result.run.status).toBe("failed");
+      expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(expectedReason);
+    }
+  );
+
+  it("ignores inherited customer workflow artifact fields on executor output", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/inherited-artifact.jsonl");
+    Object.defineProperty(Object.prototype, "customerWorkflowArtifact", {
+      configurable: true,
+      value: "draft-only"
+    });
+
+    try {
+      const result = await runWorkflow({
+        definition,
+        statePath,
+        triggerContext: {
+          requestId: "inherited-artifact",
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-public-demo",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-public-api"
+            }
+          }
+        },
+        stepHandler: () =>
+          ({
+            requestId: "req_inherited_artifact",
+            status: "succeeded",
+            observedAt: "2026-05-13T01:04:45.000Z",
+            result: {
+              status: "succeeded",
+              output: {
+                observation: "own payload data"
+              }
+            }
+          }) satisfies ExecutorConnectorStatusSnapshot
+      });
+
+      expect(result.run.status).toBe("succeeded");
+      expect(result.stepAttempts["draft-action"][0]?.result).toMatchObject({
+        executor: {
+          result: {
+            output: {
+              observation: "own payload data"
+            }
+          }
+        }
+      });
+    } finally {
+      delete Object.prototype.customerWorkflowArtifact;
+    }
+  });
+
+  it("fails closed when customer workflow output tries to infer an automatic quality decision", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/automatic-decision.jsonl");
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "automatic-quality-decision",
+        customerWorkflow: {
+          ref: "public-release-approval",
+          mode: "draft-only",
+          erpNext: {
+            siteRef: "erpnext-public-demo",
+            objectType: "Sales Order",
+            endpointRef: "erpnext-public-api"
+          }
+        }
+      },
+      stepHandler: () =>
+        ({
+          requestId: "req_automatic_quality_decision",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:05:00.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              automaticQualityDecision: true,
+              customerWorkflowArtifact: {
+                artifactIntent: "draft-only",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "customer workflow output cannot infer automatic quality decisions"
+    );
+    await expect(readFile(statePath, "utf8")).resolves.not.toContain(
+      "automaticQualityDecision"
+    );
+  });
+
   it("keeps approval-required steps human-controlled instead of retrying automatically", async () => {
     const definition = createApprovalWorkflowDefinition();
     const statePath = await createTempPath("ensen-flow-approval-", "runs/approval.jsonl");
@@ -149,6 +776,73 @@ describe("approval recovery model", () => {
     await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
   });
 
+  it("uses persisted customer workflow trigger context when resuming a run", async () => {
+    const definition = createCustomerWorkflowApprovalBoundaryDefinition();
+    delete definition.trigger.idempotencyKey;
+    const statePath = await createTempPath("ensen-flow-approval-", "runs/resume-persisted-context.jsonl");
+    const runId = `${definition.id}-local-run`;
+    let stepHandlerCalled = false;
+
+    await createWorkflowRun(statePath, {
+      runId,
+      workflowId: definition.id,
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-05-13T01:08:00.000Z",
+        context: {
+          requestId: "persisted-draft-context",
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only",
+            erpNext: {
+              siteRef: "erpnext-public-demo",
+              objectType: "Sales Order",
+              endpointRef: "erpnext-public-api"
+            }
+          }
+        }
+      },
+      createdAt: "2026-05-13T01:08:01.000Z"
+    });
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      stepHandler: ({ triggerContext }) => {
+        stepHandlerCalled = true;
+        expect(triggerContext).toMatchObject({
+          customerWorkflow: {
+            ref: "public-release-approval",
+            mode: "draft-only"
+          }
+        });
+        return {
+          requestId: "req_resume_persisted_context",
+          status: "succeeded",
+          observedAt: "2026-05-13T01:08:02.000Z",
+          result: {
+            status: "succeeded",
+            output: {
+              customerWorkflowArtifact: {
+                artifactIntent: "committed",
+                approvalState: "approval-required",
+                externalApplicationState: "not-applied"
+              }
+            }
+          }
+        } satisfies ExecutorConnectorStatusSnapshot;
+      }
+    });
+
+    expect(stepHandlerCalled).toBe(true);
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["draft-action"][0]?.retry?.reason).toBe(
+      "draft-only customer workflow artifacts cannot be committed without explicit human approval"
+    );
+    await expect(readFile(statePath, "utf8")).resolves.not.toContain("customerWorkflowArtifact");
+  });
+
   it.each([
     {
       executorStatus: "blocked",
@@ -266,6 +960,44 @@ const createApprovalWorkflowDefinition = (): WorkflowDefinition => ({
           strategy: "fixed",
           delayMs: 1000
         }
+      }
+    }
+  ]
+});
+
+const createCustomerWorkflowApprovalBoundaryDefinition = (): WorkflowDefinition => ({
+  schemaVersion: "flow.workflow.v1",
+  id: "customer-approval-boundary-demo",
+  metadata: {
+    customerWorkflowAllowlist: {
+      schemaVersion: "flow.customer-workflow-allowlist.v1",
+      entries: [
+        {
+          customerWorkflowRef: "public-release-approval",
+          modes: ["read-only", "draft-only"],
+          erpNext: {
+            siteRefs: ["erpnext-public-demo"],
+            objectTypes: ["Sales Order"],
+            endpointRefs: ["erpnext-public-api"]
+          }
+        }
+      ]
+    }
+  },
+  trigger: {
+    type: "manual",
+    idempotencyKey: {
+      source: "input",
+      field: "requestId",
+      required: true
+    }
+  },
+  steps: [
+    {
+      id: "draft-action",
+      action: {
+        type: "local",
+        name: "draft_action"
       }
     }
   ]

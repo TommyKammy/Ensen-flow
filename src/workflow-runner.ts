@@ -28,6 +28,7 @@ import {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
+import { assertCustomerWorkflowApprovalBoundary } from "./customer-workflow-approval-boundary.js";
 import { assertCustomerWorkflowAllowlisted } from "./customer-workflow-allowlist.js";
 import type {
   IdempotencyKeyDefinition,
@@ -206,13 +207,15 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       });
 
       try {
+        const currentRunState = await readCurrentRunState();
+        const persistedTriggerContext = currentRunState.run.trigger.context ?? {};
         const stepResult = normalizeStepHandlerResult(
           await stepHandler({
             definition: input.definition,
             step,
             attempt,
-            triggerContext,
-            runState: await readCurrentRunState()
+            triggerContext: persistedTriggerContext,
+            runState: currentRunState
           })
         );
 
@@ -225,6 +228,10 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             stepResult
           );
         }
+        assertCustomerWorkflowApprovalBoundary({
+          triggerContext: persistedTriggerContext,
+          stepResult
+        });
 
         const completedAt = now();
         await appendRunEvent({

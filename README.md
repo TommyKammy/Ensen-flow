@@ -190,6 +190,20 @@ metadata. Allowlist-miss diagnostics report only the failing boundary category
 and mode; customer identifiers, endpoint details, and regulated-looking values
 are redacted from public artifacts.
 
+The local runner also enforces the copied Protocol v0.4.0 approval and
+draft-only vocabulary at customer workflow step result boundaries. In
+`read-only` mode, Flow accepts observation-only metadata that remains
+`not-applied` and rejects draft-only, committed, approved, or externally applied
+artifact claims. In `draft-only` mode, proposed artifacts must stay
+`draft-only` and `not-applied` while their approval state is
+`approval-required`, `rejected`, `revoked`, or `superseded`; a committed
+artifact requires an explicit human approval reference and decision boundary.
+Automatic quality decisions and live write-back claims fail closed before the
+unsafe artifact body is persisted as a completed step result. These records are
+operator-visible control states only, not final quality decisions, live ERPNext
+write-back approval, electronic signatures, batch release records, validated
+system evidence, or compliance claims.
+
 This internal shape is intended to support a later mapping to EIP AuditEvent,
 but it does not claim EIP conformance and does not import Ensen-protocol runtime
 packages. Formal protocol mapping belongs to a later protocol or connector

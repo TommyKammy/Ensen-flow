@@ -221,6 +221,8 @@ export interface ReadWorkflowRunStateOptions {
   artifactHygiene?: "enforce" | "skip";
 }
 
+export type AppendWorkflowRunEventOptions = ReadWorkflowRunStateOptions;
+
 export type WorkflowStepAttemptResultMetadata = Record<string, unknown>;
 
 export type WorkflowRunRecoveryClassification =
@@ -290,19 +292,22 @@ export const createWorkflowRun = async (
 
 export const appendWorkflowRunEvent = async (
   statePath: string,
-  event: AppendableWorkflowRunEvent
+  event: AppendableWorkflowRunEvent,
+  options?: AppendWorkflowRunEventOptions
 ): Promise<void> => {
   validateWorkflowRunEvent(event, 1);
   await mkdir(dirname(statePath), { recursive: true });
 
   await withStatePathAppendLock(statePath, async () => {
-    const currentState = await readWorkflowRunState(statePath).catch((error: unknown) => {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        throw missingWorkflowRunStateError();
-      }
+    const currentState = await readWorkflowRunState(statePath, options).catch(
+      (error: unknown) => {
+        if (isNodeError(error) && error.code === "ENOENT") {
+          throw missingWorkflowRunStateError();
+        }
 
-      throw error;
-    });
+        throw error;
+      }
+    );
 
     if (currentState.run.runId !== event.runId) {
       throw new Error("appendWorkflowRunEvent event.runId must match the existing workflow run");

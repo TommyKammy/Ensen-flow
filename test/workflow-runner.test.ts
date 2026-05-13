@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -148,6 +148,97 @@ describe("sequential workflow runner", () => {
       "step.started",
       "step.completed",
       "workflow.completed"
+    ]);
+  });
+
+  it("propagates skipped artifact hygiene across resumed legacy run execution", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    const statePath = await createTempStatePath();
+    const calls: string[] = [];
+    const legacyUnsafeToken = "test-token-shaped-value";
+    const runId = "local-manual-demo-legacy-resume";
+
+    await mkdir(dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      [
+        {
+          type: "run.created",
+          runId,
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v1",
+          trigger: {
+            type: "manual",
+            receivedAt: "2026-04-29T00:06:00.000Z",
+            context: {
+              requestId: "legacy-resume",
+              connectorConfig: {
+                accessToken: legacyUnsafeToken
+              }
+            },
+            idempotencyKey: {
+              source: "input",
+              key: "legacy-resume"
+            }
+          },
+          occurredAt: "2026-04-29T00:06:01.000Z"
+        },
+        {
+          type: "step.attempt.started",
+          runId,
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:06:02.000Z"
+        },
+        {
+          type: "step.attempt.completed",
+          runId,
+          stepId: "collect-input",
+          attempt: 1,
+          occurredAt: "2026-04-29T00:06:03.000Z"
+        }
+      ]
+        .map((event) => JSON.stringify(event))
+        .join("\n") + "\n",
+      "utf8"
+    );
+
+    await expect(readWorkflowRunState(statePath)).rejects.toThrow(
+      "trigger.context.connectorConfig.accessToken must not contain unsafe workflow artifact values (category: credential)"
+    );
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      triggerContext: {
+        requestId: "legacy-resume"
+      },
+      existingRunStateArtifactHygiene: "skip",
+      now: createClock([
+        "2026-04-29T00:06:04.000Z",
+        "2026-04-29T00:06:05.000Z",
+        "2026-04-29T00:06:06.000Z"
+      ]),
+      stepHandler: ({ step, runState }) => {
+        calls.push(step.id);
+        expect(runState.run.trigger.context).toMatchObject({
+          requestId: "legacy-resume",
+          connectorConfig: {
+            accessToken: legacyUnsafeToken
+          }
+        });
+      }
+    });
+
+    expect(calls).toEqual(["notify-operator"]);
+    expect(result.run.status).toBe("succeeded");
+    expect(result.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "step.attempt.started",
+      "step.attempt.completed",
+      "run.completed"
     ]);
   });
 

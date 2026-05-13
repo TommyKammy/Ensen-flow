@@ -13,6 +13,7 @@ import type {
   ExecutorConnectorExecutionStatus
 } from "./executor-connector.js";
 import type {
+  AppendableWorkflowRunEvent,
   WorkflowRunIdempotencyMetadata,
   WorkflowRunRecoveryDecisionMetadata,
   WorkflowStepAttemptResultMetadata,
@@ -94,6 +95,15 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     input.runId ??
     `${input.definition.id}-${triggerIdempotencyKey?.key ?? "local-run"}`;
   const stepHandler = input.stepHandler ?? defaultWorkflowStepHandler;
+  const existingRunStateArtifactHygiene =
+    input.existingRunStateArtifactHygiene ?? "enforce";
+  const existingRunStateReadOptions = {
+    artifactHygiene: existingRunStateArtifactHygiene
+  };
+  const readCurrentRunState = () =>
+    readWorkflowRunState(input.statePath, existingRunStateReadOptions);
+  const appendRunEvent = (event: AppendableWorkflowRunEvent) =>
+    appendWorkflowRunEvent(input.statePath, event, existingRunStateReadOptions);
   const auditWriter =
     input.auditPath === undefined
       ? undefined
@@ -108,7 +118,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
   const existingState = await readExistingRunState(
     input.statePath,
-    input.existingRunStateArtifactHygiene
+    existingRunStateArtifactHygiene
   );
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
@@ -145,7 +155,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
       const competingState = await readCompetingRunState(
         input.statePath,
-        input.existingRunStateArtifactHygiene
+        existingRunStateArtifactHygiene
       );
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
       assertPersistedRunCustomerWorkflowAllowlisted(competingState, input.definition);
@@ -166,9 +176,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
   for (const step of orderedSteps) {
     const retryPolicy = step.retry ?? { maxAttempts: 1, backoff: { strategy: "none" as const } };
-    const latestAttempt = latestStepAttempt(
-      (await readWorkflowRunState(input.statePath)).stepAttempts[step.id]
-    );
+    const latestAttempt = latestStepAttempt((await readCurrentRunState()).stepAttempts[step.id]);
     if (latestAttempt?.status === "succeeded") {
       continue;
     }
@@ -183,7 +191,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
     for (let attempt = firstAttempt; attempt <= retryPolicy.maxAttempts; attempt += 1) {
       const startedAt = now();
-      await appendWorkflowRunEvent(input.statePath, {
+      await appendRunEvent({
         type: "step.attempt.started",
         runId,
         stepId: step.id,
@@ -204,7 +212,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             step,
             attempt,
             triggerContext,
-            runState: await readWorkflowRunState(input.statePath)
+            runState: await readCurrentRunState()
           })
         );
 
@@ -219,7 +227,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         }
 
         const completedAt = now();
-        await appendWorkflowRunEvent(input.statePath, {
+        await appendRunEvent({
           type: "step.attempt.completed",
           runId,
           stepId: step.id,
@@ -243,7 +251,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         const nextAttemptAt = retryable
           ? calculateNextAttemptAt(failedAt, retryPolicy, attempt)
           : undefined;
-        await appendWorkflowRunEvent(input.statePath, {
+        await appendRunEvent({
           type: "step.attempt.failed",
           runId,
           stepId: step.id,
@@ -277,12 +285,12 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           recovery?.state === "approval-required" ||
           recovery?.state === "manual-repair-needed"
         ) {
-          return readWorkflowRunState(input.statePath);
+          return readCurrentRunState();
         }
 
         if (!retryable) {
           const completedAt = now();
-          await appendWorkflowRunEvent(input.statePath, {
+          await appendRunEvent({
             type: "run.completed",
             runId,
             terminalState: "failed",
@@ -297,7 +305,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
               reason: errorReason(error)
             }
           });
-          return readWorkflowRunState(input.statePath);
+          return readCurrentRunState();
         }
 
         await writeStepAuditEvent(auditWriter, {
@@ -316,7 +324,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   }
 
   const completedAt = now();
-  await appendWorkflowRunEvent(input.statePath, {
+  await appendRunEvent({
     type: "run.completed",
     runId,
     terminalState: "succeeded",
@@ -328,7 +336,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     outcome: { status: "succeeded" }
   });
 
-  return readWorkflowRunState(input.statePath);
+  return readCurrentRunState();
 };
 
 class WorkflowStepOutcomeError extends Error {

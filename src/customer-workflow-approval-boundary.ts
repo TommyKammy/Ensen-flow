@@ -12,13 +12,13 @@ export type CustomerWorkflowApprovalState =
   | "superseded";
 
 export interface CustomerWorkflowApprovalBoundaryArtifact {
-  artifactIntent?: string;
-  intent?: string;
-  approvalState?: string;
-  externalApplicationState?: string;
-  humanApprovalRef?: string;
-  decisionBoundary?: string;
-  supersedesRef?: string;
+  artifactIntent?: unknown;
+  intent?: unknown;
+  approvalState?: unknown;
+  externalApplicationState?: unknown;
+  humanApprovalRef?: unknown;
+  decisionBoundary?: unknown;
+  supersedesRef?: unknown;
 }
 
 const APPROVAL_STATES = new Set<CustomerWorkflowApprovalState>([
@@ -78,7 +78,7 @@ const assertArtifactBoundary = (input: {
   mode: CustomerWorkflowAllowlistMode;
 }): void => {
   const artifactIntent = input.artifact.artifactIntent ?? input.artifact.intent;
-  const approvalState = parseApprovalState(input.artifact.approvalState);
+  const approvalState = parseApprovalState(input.artifact);
   const externalApplicationState = input.artifact.externalApplicationState;
 
   if (externalApplicationState !== "not-applied") {
@@ -127,7 +127,13 @@ const assertArtifactBoundary = (input: {
     );
   }
 
-  if (approvalState !== undefined && !NON_COMMITTED_APPROVAL_STATES.has(approvalState)) {
+  if (approvalState === undefined) {
+    throw new Error(
+      "draft-only customer workflow artifacts require an explicit lifecycle approvalState before approval"
+    );
+  }
+
+  if (!NON_COMMITTED_APPROVAL_STATES.has(approvalState)) {
     throw new Error(
       "draft-only customer workflow artifacts require an explicit human approval before approved state"
     );
@@ -185,14 +191,14 @@ const resolveCustomerWorkflowArtifacts = (
 ): CustomerWorkflowApprovalBoundaryArtifact[] => {
   const artifacts: CustomerWorkflowApprovalBoundaryArtifact[] = [];
 
-  if ("customerWorkflowArtifact" in result) {
+  if (hasOwn(result, "customerWorkflowArtifact")) {
     if (!isRecord(result.customerWorkflowArtifact)) {
       throw new Error("customer workflow artifact must be an object");
     }
     artifacts.push(result.customerWorkflowArtifact);
   }
 
-  if ("customerWorkflowArtifacts" in result) {
+  if (hasOwn(result, "customerWorkflowArtifacts")) {
     if (!Array.isArray(result.customerWorkflowArtifacts)) {
       throw new Error("customer workflow artifacts must be an array of objects");
     }
@@ -210,17 +216,22 @@ const resolveCustomerWorkflowArtifacts = (
 
 const assertNoBoundaryFieldsOutsideOutput = (result: Record<string, unknown>): void => {
   for (const key of CUSTOMER_WORKFLOW_OUTPUT_BOUNDARY_KEYS) {
-    if (key in result) {
+    if (hasOwn(result, key)) {
       throw new Error("customer workflow boundary fields must be provided in executor result output");
     }
   }
 };
 
 const parseApprovalState = (
-  value: unknown
+  artifact: CustomerWorkflowApprovalBoundaryArtifact
 ): CustomerWorkflowApprovalState | undefined => {
-  if (typeof value !== "string") {
+  if (!hasOwn(artifact, "approvalState")) {
     return undefined;
+  }
+
+  const value = artifact.approvalState;
+  if (typeof value !== "string") {
+    throw new Error("customer workflow artifact approvalState must be a string");
   }
 
   if (!APPROVAL_STATES.has(value as CustomerWorkflowApprovalState)) {
@@ -258,6 +269,11 @@ const isCustomerWorkflowMode = (
 
 const hasNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
+
+const hasOwn = <T extends object, K extends PropertyKey>(
+  value: T,
+  key: K
+): value is T & Record<K, unknown> => Object.hasOwn(value, key);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

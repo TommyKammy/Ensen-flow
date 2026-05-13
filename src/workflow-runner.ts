@@ -207,13 +207,15 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       });
 
       try {
+        const currentRunState = await readCurrentRunState();
+        const persistedTriggerContext = currentRunState.run.trigger.context ?? {};
         const stepResult = normalizeStepHandlerResult(
           await stepHandler({
             definition: input.definition,
             step,
             attempt,
-            triggerContext,
-            runState: await readCurrentRunState()
+            triggerContext: persistedTriggerContext,
+            runState: currentRunState
           })
         );
 
@@ -227,7 +229,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           );
         }
         assertCustomerWorkflowApprovalBoundary({
-          triggerContext,
+          triggerContext: persistedTriggerContext,
           stepResult
         });
 

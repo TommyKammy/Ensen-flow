@@ -83,10 +83,6 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const orderedSteps = orderSteps(input.definition.steps);
   const now = input.now ?? (() => new Date().toISOString());
   const triggerContext = input.triggerContext ?? {};
-  assertCustomerWorkflowAllowlisted({
-    definition: input.definition,
-    triggerContext
-  });
   const triggerIdempotencyKey = resolveIdempotencyKey(
     input.definition.trigger.idempotencyKey,
     input.definition,
@@ -112,13 +108,15 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const existingState = await readExistingRunState(input.statePath);
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
-    assertExistingRunCustomerWorkflowAllowlisted(existingState, input.definition);
+    assertPersistedRunCustomerWorkflowAllowlisted(existingState, input.definition);
+    assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
     input.existingRunStateGuard?.(existingState);
     if (existingState.run.terminalState !== undefined) {
       return existingState;
     }
     assertExistingRunRecoverable(existingState, orderedSteps);
   } else {
+    assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
     const triggerReceivedAt = now();
     const createdAt = now();
     let createdNewRun = false;
@@ -143,7 +141,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
       const competingState = await readCompetingRunState(input.statePath);
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
-      assertExistingRunCustomerWorkflowAllowlisted(competingState, input.definition);
+      assertPersistedRunCustomerWorkflowAllowlisted(competingState, input.definition);
+      assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
       input.existingRunStateGuard?.(competingState);
       if (competingState.run.terminalState !== undefined) {
         return competingState;
@@ -532,7 +531,17 @@ const assertExistingRunMatches = (
   }
 };
 
-const assertExistingRunCustomerWorkflowAllowlisted = (
+const assertRequestedCustomerWorkflowAllowlisted = (
+  definition: WorkflowDefinition,
+  triggerContext: Record<string, unknown>
+): void => {
+  assertCustomerWorkflowAllowlisted({
+    definition,
+    triggerContext
+  });
+};
+
+const assertPersistedRunCustomerWorkflowAllowlisted = (
   existingState: WorkflowRunState,
   definition: WorkflowDefinition
 ): void => {

@@ -633,6 +633,58 @@ describe("sequential workflow runner", () => {
     await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("validates persisted customer workflow trigger context before returning a terminal run", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    delete definition.trigger.idempotencyKey;
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let stepHandlerCalled = false;
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-local-run",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-05-13T00:12:00.000Z",
+        context: {
+          customerWorkflow: {
+            ref: "customer-workflow-private-placeholder",
+            mode: "draft-only"
+          }
+        }
+      },
+      createdAt: "2026-05-13T00:12:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "local-manual-demo-local-run",
+      terminalState: "succeeded",
+      occurredAt: "2026-05-13T00:12:02.000Z"
+    });
+
+    await expect(
+      runWorkflow({
+        definition,
+        statePath,
+        auditPath,
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow(
+      "customer workflow input is not allowlisted for mode draft-only; diagnostic redacted"
+    );
+
+    expect(stepHandlerCalled).toBe(false);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.events.map((event) => event.type)).toEqual([
+      "run.created",
+      "run.completed"
+    ]);
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("runs a valid manual workflow without trigger idempotency metadata", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     delete definition.trigger.idempotencyKey;

@@ -2,6 +2,10 @@ import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { WorkflowRunTerminalState } from "./workflow-run-state.js";
+import {
+  findUnsafeWorkflowArtifactValue,
+  formatUnsafeWorkflowArtifactDiagnostic
+} from "./workflow-artifact-hygiene.js";
 
 export type NeutralAuditEventType =
   | "workflow.started"
@@ -194,6 +198,7 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
 
   if (event.retry !== undefined) {
     requireNonEmptyString(event.retry.reason, "audit event retry.reason");
+    rejectUnsafeAuditArtifactValues(event.retry.reason, "audit event retry.reason");
     if (event.retry.nextAttemptAt !== undefined) {
       requireIsoTimestamp(event.retry.nextAttemptAt, "audit event retry.nextAttemptAt");
     }
@@ -207,6 +212,14 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
 
   if (event.outcome?.reason !== undefined) {
     requireNonEmptyString(event.outcome.reason, "audit event outcome.reason");
+    rejectUnsafeAuditArtifactValues(event.outcome.reason, "audit event outcome.reason");
+  }
+};
+
+const rejectUnsafeAuditArtifactValues = (value: unknown, path: string): void => {
+  const finding = findUnsafeWorkflowArtifactValue(value, path);
+  if (finding !== undefined) {
+    throw new Error(formatUnsafeWorkflowArtifactDiagnostic(finding));
   }
 };
 

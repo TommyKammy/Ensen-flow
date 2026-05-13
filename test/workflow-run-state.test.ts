@@ -558,6 +558,99 @@ describe("workflow run JSONL state", () => {
     }
   );
 
+  it.each([
+    {
+      context: { connectorConfig: { apiKey: "placeholder-api-key-value" } },
+      message:
+        "trigger.context.connectorConfig.apiKey must not contain unsafe workflow artifact values (category: credential)"
+    },
+    {
+      context: { connectorConfig: { accessToken: "placeholder-token-value" } },
+      message:
+        "trigger.context.connectorConfig.accessToken must not contain unsafe workflow artifact values (category: credential)"
+    },
+    {
+      context: { connectorConfig: { bearerToken: "placeholder-token-value" } },
+      message:
+        "trigger.context.connectorConfig.bearerToken must not contain unsafe workflow artifact values (category: credential)"
+    },
+    {
+      context: { connectorConfig: { refreshToken: "placeholder-token-value" } },
+      message:
+        "trigger.context.connectorConfig.refreshToken must not contain unsafe workflow artifact values (category: credential)"
+    },
+    {
+      context: { intake: { patientId: "patient-12345" } },
+      message:
+        "trigger.context.intake.patientId must not contain unsafe workflow artifact values (category: regulated-content)"
+    },
+    {
+      context: { intake: { customerEmail: "private-customer@example.invalid" } },
+      message:
+        "trigger.context.intake.customerEmail must not contain unsafe workflow artifact values (category: customer-identifier)"
+    },
+    {
+      context: { serialized: JSON.stringify({ customerEmail: "private-customer@example.invalid" }) },
+      message:
+        "trigger.context.serialized.customerEmail must not contain unsafe workflow artifact values (category: customer-identifier)"
+    },
+    {
+      context: {
+        serializedFragment: `public fixture ${JSON.stringify({
+          customerEmail: "private-customer@example.invalid"
+        })}`
+      },
+      message:
+        "trigger.context.serializedFragment must not contain unsafe workflow artifact values (category: customer-identifier)"
+    }
+  ])(
+    "rejects credential and regulated-shaped trigger fields without echoing values %#",
+    async ({ context, message }) => {
+      const statePath = await createTempStatePath();
+
+      await expect(
+        createWorkflowRun(statePath, {
+          runId: "run-unsafe-trigger-field",
+          workflowId: "operator-review",
+          workflowVersion: "flow.workflow.v1",
+          trigger: {
+            type: "manual",
+            receivedAt: "2026-04-29T00:00:00.000Z",
+            context
+          },
+          createdAt: "2026-04-29T00:00:01.000Z"
+        })
+      ).rejects.toThrow(`workflow run state line 1: ${message}`);
+
+      await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  );
+
+  it.each([
+    { context: { connectorConfig: { apiKey: {} } } },
+    { context: { connectorConfig: { credentials: {} } } },
+    { context: { intake: { patientId: {} } } },
+    { context: { intake: { customerEmail: {} } } }
+  ])("allows empty object placeholders for sensitive trigger fields %#", async ({ context }) => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-empty-sensitive-placeholder",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    const state = await readWorkflowRunState(statePath);
+
+    expect(state.run.trigger.context).toEqual(context);
+  });
+
   it.each(["succeeded", "failed", "canceled", "retryable-failed"] as const)(
     "represents %s as a distinct terminal state",
     async (terminalState) => {

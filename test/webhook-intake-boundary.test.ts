@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -201,6 +201,73 @@ describe("webhook intake boundary", () => {
 
     expect(await readWorkflowRunState(statePath)).toEqual(legacyState);
     expect(await readAuditEvents(auditPath)).toEqual(auditBeforeReplay);
+  });
+
+  it("replays existing webhook runs before applying upgraded payload artifact guards", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const input = createWebhookInput();
+    input.payload = {
+      eventType: "local-demo.created",
+      patientId: "patient-12345"
+    };
+    const expectedRunId = createExpectedWebhookRunId(definition.id, input.requestId);
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+    await mkdir(stateRoot, { recursive: true });
+    await writeFile(
+      statePath,
+      [
+        JSON.stringify({
+          type: "run.created",
+          runId: expectedRunId,
+          workflowId: definition.id,
+          workflowVersion: "flow.workflow.v1",
+          trigger: {
+            type: "webhook",
+            receivedAt: "2026-05-02T01:00:01.000Z",
+            context: {
+              webhook: {
+                path: input.path,
+                receivedAt: input.receivedAt,
+                headers: input.headers,
+                payload: input.payload
+              },
+              requestId: input.requestId
+            },
+            idempotencyKey: {
+              source: "input",
+              key: input.requestId
+            }
+          },
+          occurredAt: "2026-05-02T01:00:01.000Z"
+        }),
+        JSON.stringify({
+          type: "run.completed",
+          runId: expectedRunId,
+          terminalState: "succeeded",
+          occurredAt: "2026-05-02T01:00:02.000Z"
+        })
+      ].join("\n") + "\n"
+    );
+
+    const replay = await consumeWebhookInput({
+      definition,
+      stateRoot,
+      auditPath,
+      input
+    });
+
+    expect(replay.run.runId).toBe(expectedRunId);
+    expect(replay.run.terminalState).toBe("succeeded");
+    expect(replay.run.trigger.context).toMatchObject({
+      webhook: {
+        payload: input.payload
+      },
+      requestId: input.requestId
+    });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects reused requestIds when normalized webhook payload changes without writing audit events", async () => {

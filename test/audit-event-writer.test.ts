@@ -49,7 +49,7 @@ describe("neutral audit event writer", () => {
         receivedAt: "2026-04-29T00:00:00.000Z",
         context: {
           requestId: "private-request-id",
-          customerName: "private-customer"
+          privateLabel: "private-label"
         },
         idempotencyKey: {
           source: "input",
@@ -177,7 +177,7 @@ describe("neutral audit event writer", () => {
     });
     expect(serialized).not.toContain(statePath);
     expect(serialized).not.toContain(auditPath);
-    expect(serialized).not.toContain("private-customer");
+    expect(serialized).not.toContain("private-label");
     expect(serialized).not.toContain("private-request-id");
     expect(serialized).not.toContain("private-idempotency-key");
   });

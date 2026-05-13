@@ -575,6 +575,11 @@ describe("workflow run JSONL state", () => {
         "trigger.context.connectorConfig.bearerToken must not contain unsafe workflow artifact values (category: credential)"
     },
     {
+      context: { connectorConfig: { refreshToken: "placeholder-token-value" } },
+      message:
+        "trigger.context.connectorConfig.refreshToken must not contain unsafe workflow artifact values (category: credential)"
+    },
+    {
       context: { intake: { patientId: "patient-12345" } },
       message:
         "trigger.context.intake.patientId must not contain unsafe workflow artifact values (category: regulated-content)"
@@ -588,6 +593,15 @@ describe("workflow run JSONL state", () => {
       context: { serialized: JSON.stringify({ customerEmail: "private-customer@example.invalid" }) },
       message:
         "trigger.context.serialized.customerEmail must not contain unsafe workflow artifact values (category: customer-identifier)"
+    },
+    {
+      context: {
+        serializedFragment: `public fixture ${JSON.stringify({
+          customerEmail: "private-customer@example.invalid"
+        })}`
+      },
+      message:
+        "trigger.context.serializedFragment must not contain unsafe workflow artifact values (category: customer-identifier)"
     }
   ])(
     "rejects credential and regulated-shaped trigger fields without echoing values %#",

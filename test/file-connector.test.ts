@@ -239,6 +239,41 @@ describe("local file connector skeleton", () => {
     expect(JSON.stringify(result)).not.toContain("patient-12345");
   });
 
+  it("rejects JSON-fragment customer fixture writes before persisting content", async () => {
+    const fixtureRoot = await createTempRoot();
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }]
+    });
+    const unsafeContent = `fixture export ${JSON.stringify({
+      customerEmail: "private-customer@example.invalid"
+    })}`;
+
+    const result = await connector.submit({
+      workflowId: "file-demo",
+      runId: "file-demo-run",
+      stepId: "write-json-customer-fragment",
+      idempotencyKey: "file-demo-run:write-json-customer-fragment",
+      file: {
+        action: "write",
+        rootAlias: "fixture-root",
+        path: "outputs/customer-fragment.txt",
+        content: unsafeContent
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid-request",
+        message:
+          "local file content must not contain unsafe workflow artifact values (category: customer-identifier)",
+        retryable: false
+      }
+    });
+    await expect(readFile(join(fixtureRoot, "outputs", "customer-fragment.txt"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain("private-customer@example.invalid");
+  });
+
   it("rejects unsafe fixture reads before returning connector output", async () => {
     const fixtureRoot = await createTempRoot();
     await mkdir(join(fixtureRoot, "inputs"), { recursive: true });

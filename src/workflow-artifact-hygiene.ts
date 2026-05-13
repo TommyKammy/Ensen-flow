@@ -22,9 +22,9 @@ const TOKEN_ASSIGNMENT_PATTERN = /(?:^|\b)token\s*[:=]/iu;
 const SESSION_COOKIE_PATTERN =
   /(?:^|\b)(?:cookie|set-cookie)\s*:\s*[^;\n]*(?:session|sid)=|(?:^|\b)(?:sessionid|session_id|sid)\s*=/iu;
 const REGULATED_CONTENT_ASSIGNMENT_PATTERN =
-  /(?:^|\b)(?:ssn|social[_ -]?security[_ -]?number|patient[_ -]?id|patient[_ -]?name|medical[_ -]?record[_ -]?number|mrn)\s*[:=]/iu;
+  /(?:^|\b)(?:ssn|social[_ -]?security[_ -]?number|patient[_ -]?id|patient[_ -]?name|medical[_ -]?record[_ -]?number|mrn)\s*["']?\s*[:=]/iu;
 const CUSTOMER_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /(?:^|\b)(?:customer[_ -]?id|customer[_ -]?name|customer[_ -]?email|account[_ -]?number)\s*[:=]/iu;
+  /(?:^|\b)(?:customer[_ -]?id|customer[_ -]?name|customer[_ -]?email|account[_ -]?number)\s*["']?\s*[:=]/iu;
 const WORKSTATION_LOCAL_PATH_PATTERN =
   /(?:^|["'\s])(?:\/(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/[^/\\\s]+|[A-Za-z]:[\\/][^/\\\s]+|file:\/\/\/(?:[A-Za-z]:\/|(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/)[^/\\\s]+)/u;
 const CREDENTIAL_FIELD_KEYS = new Set([
@@ -59,6 +59,19 @@ const CUSTOMER_IDENTIFIER_FIELD_KEYS = new Set([
   "customeremail",
   "accountnumber"
 ]);
+const TOKEN_BEARING_FIELD_KEY_MARKERS = ["token"];
+const CREDENTIAL_BEARING_FIELD_KEY_MARKERS = [
+  "authorization",
+  "password",
+  "passwd",
+  "secret",
+  "apikey",
+  "accesskey",
+  "privatekey",
+  "credential",
+  "sessioncookie",
+  "sessionid"
+];
 
 export const findUnsafeWorkflowArtifactValue = (
   value: unknown,
@@ -148,16 +161,20 @@ const classifyUnsafeWorkflowArtifactKey = (
   }
 
   const normalized = normalizeArtifactKey(key);
+  const tokenBearingCategory = classifyTokenBearingArtifactKey(normalized);
+  if (tokenBearingCategory !== undefined) {
+    return tokenBearingCategory;
+  }
+
   if (CREDENTIAL_FIELD_KEYS.has(normalized)) {
     return normalized === "cookie" || normalized === "setcookie" || normalized === "sessioncookie"
       ? "session-cookie"
       : "credential";
   }
 
-  if (isCredentialBearingKey(normalized)) {
-    return normalized.includes("cookie") || normalized.includes("session")
-      ? "session-cookie"
-      : "credential";
+  const credentialBearingCategory = classifyCredentialBearingArtifactKey(normalized);
+  if (credentialBearingCategory !== undefined) {
+    return credentialBearingCategory;
   }
 
   if (REGULATED_FIELD_KEYS.has(normalized)) {
@@ -174,20 +191,29 @@ const classifyUnsafeWorkflowArtifactKey = (
 const normalizeArtifactKey = (key: string): string =>
   key.replaceAll(/[^A-Za-z0-9]/gu, "").toLowerCase();
 
-const isCredentialBearingKey = (normalizedKey: string): boolean =>
-  [
-    "authorization",
-    "password",
-    "passwd",
-    "secret",
-    "apikey",
-    "accesskey",
-    "privatekey",
-    "credential",
-    "token",
-    "sessioncookie",
-    "sessionid"
-  ].some((token) => normalizedKey.includes(token));
+const classifyTokenBearingArtifactKey = (
+  normalizedKey: string
+): UnsafeWorkflowArtifactCategory | undefined => {
+  if (!TOKEN_BEARING_FIELD_KEY_MARKERS.some((marker) => normalizedKey.includes(marker))) {
+    return undefined;
+  }
+
+  return normalizedKey.includes("cookie") || normalizedKey.includes("session")
+    ? "session-cookie"
+    : "credential";
+};
+
+const classifyCredentialBearingArtifactKey = (
+  normalizedKey: string
+): UnsafeWorkflowArtifactCategory | undefined => {
+  if (!CREDENTIAL_BEARING_FIELD_KEY_MARKERS.some((marker) => normalizedKey.includes(marker))) {
+    return undefined;
+  }
+
+  return normalizedKey.includes("cookie") || normalizedKey.includes("session")
+    ? "session-cookie"
+    : "credential";
+};
 
 const parseJsonFormattedContainer = (value: string): unknown[] | Record<string, unknown> | undefined => {
   const trimmed = value.trim();

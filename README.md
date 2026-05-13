@@ -172,6 +172,20 @@ diagnostics; the matched value stays out of public-safe output. The
 state, audit, and export file references until a later Protocol evidence profile
 defines a formal mapping.
 
+Track B customer workflow intake is guarded by a Flow-owned allowlist policy in
+workflow metadata. When trigger context includes `customerWorkflow`, the local
+runner requires an explicit `metadata.customerWorkflowAllowlist` match for the
+customer workflow reference, execution mode, and any ERPNext site, object type,
+or endpoint reference before it writes run state, audit events, or step
+artifacts. The policy is metadata only: it records fake, read-only, draft-only,
+and live-write-back mode vocabulary so Flow can reject unsafe input
+explainably, but this repository still does not implement ERPNext connector
+calls, customer data fixtures, production regulated workflow execution, or live
+write-back. `live-write-back` remains fail-closed even if listed in policy
+metadata. Allowlist-miss diagnostics report only the failing boundary category
+and mode; customer identifiers, endpoint details, and regulated-looking values
+are redacted from public artifacts.
+
 This internal shape is intended to support a later mapping to EIP AuditEvent,
 but it does not claim EIP conformance and does not import Ensen-protocol runtime
 packages. Formal protocol mapping belongs to a later protocol or connector

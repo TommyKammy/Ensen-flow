@@ -27,6 +27,7 @@ import {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
+import { assertCustomerWorkflowAllowlisted } from "./customer-workflow-allowlist.js";
 import type {
   IdempotencyKeyDefinition,
   RetryPolicy,
@@ -107,12 +108,15 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   const existingState = await readExistingRunState(input.statePath);
   if (existingState !== undefined) {
     assertExistingRunMatches(existingState, input.definition, runId, triggerIdempotencyKey);
+    assertPersistedRunCustomerWorkflowAllowlisted(existingState, input.definition);
+    assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
     input.existingRunStateGuard?.(existingState);
     if (existingState.run.terminalState !== undefined) {
       return existingState;
     }
     assertExistingRunRecoverable(existingState, orderedSteps);
   } else {
+    assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
     const triggerReceivedAt = now();
     const createdAt = now();
     let createdNewRun = false;
@@ -137,6 +141,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
 
       const competingState = await readCompetingRunState(input.statePath);
       assertExistingRunMatches(competingState, input.definition, runId, triggerIdempotencyKey);
+      assertPersistedRunCustomerWorkflowAllowlisted(competingState, input.definition);
+      assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
       input.existingRunStateGuard?.(competingState);
       if (competingState.run.terminalState !== undefined) {
         return competingState;
@@ -523,6 +529,26 @@ const assertExistingRunMatches = (
   if (existingState.run.runId !== runId) {
     throw new Error("existing workflow run state has a different runId");
   }
+};
+
+const assertRequestedCustomerWorkflowAllowlisted = (
+  definition: WorkflowDefinition,
+  triggerContext: Record<string, unknown>
+): void => {
+  assertCustomerWorkflowAllowlisted({
+    definition,
+    triggerContext
+  });
+};
+
+const assertPersistedRunCustomerWorkflowAllowlisted = (
+  existingState: WorkflowRunState,
+  definition: WorkflowDefinition
+): void => {
+  assertCustomerWorkflowAllowlisted({
+    definition,
+    triggerContext: existingState.run.trigger.context ?? {}
+  });
 };
 
 const assertExistingRunRecoverable = (

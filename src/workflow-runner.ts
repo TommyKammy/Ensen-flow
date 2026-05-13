@@ -28,6 +28,7 @@ import {
   validateWorkflowDefinition,
   workflowDefinitionSchemaVersion
 } from "./workflow-definition.js";
+import { assertCustomerWorkflowApprovalBoundary } from "./customer-workflow-approval-boundary.js";
 import { assertCustomerWorkflowAllowlisted } from "./customer-workflow-allowlist.js";
 import type {
   IdempotencyKeyDefinition,
@@ -225,6 +226,10 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             stepResult
           );
         }
+        assertCustomerWorkflowApprovalBoundary({
+          triggerContext,
+          stepResult
+        });
 
         const completedAt = now();
         await appendRunEvent({

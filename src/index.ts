@@ -39,6 +39,10 @@ export {
 } from "./customer-workflow-allowlist.js";
 
 export {
+  assertCustomerWorkflowApprovalBoundary
+} from "./customer-workflow-approval-boundary.js";
+
+export {
   createFakeHttpNotificationTransport,
   createHttpNotificationConnector
 } from "./http-notification-connector.js";
@@ -120,6 +124,11 @@ export type {
   ExecutorPolicyDecisionPayload,
   ExecutorSubmitRequest
 } from "./executor-connector.js";
+
+export type {
+  CustomerWorkflowApprovalBoundaryArtifact,
+  CustomerWorkflowApprovalState
+} from "./customer-workflow-approval-boundary.js";
 
 export type {
   CreateFakeHttpNotificationTransportInput,

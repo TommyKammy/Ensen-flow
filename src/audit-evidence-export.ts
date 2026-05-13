@@ -439,7 +439,13 @@ const normalizeDataClassification = (
   value: unknown,
   evidenceRefId: string
 ): EvidenceDataClassification => {
-  if (value === undefined || value === "public") {
+  if (value === undefined) {
+    throw new Error(
+      `evidence ref ${safeErrorMessage(evidenceRefId)} is missing required dataClassification`
+    );
+  }
+
+  if (value === "public") {
     return "public";
   }
 

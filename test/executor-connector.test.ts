@@ -714,6 +714,54 @@ describe("Ensen-loop EIP executor connector", () => {
     });
   });
 
+  it("accepts Protocol v0.4.0 Track B data classifications in EIP RunRequest payloads", async () => {
+    const submittedPayloads: unknown[] = [];
+    const connector = createEnsenLoopEipExecutorConnector({
+      transport: {
+        submitRunRequest(payload) {
+          submittedPayloads.push(payload);
+          return { requestId: payload.id };
+        },
+        getRunStatusSnapshot() {
+          throw new Error("status should not be requested");
+        },
+        getRunResult() {
+          throw new Error("result should not be requested");
+        },
+        getEvidenceBundleRef() {
+          throw new Error("evidence should not be requested");
+        }
+      },
+      now: () => "2026-04-30T04:00:00.000Z"
+    });
+
+    await expect(
+      connector.submit({
+        ...submitRequest,
+        run: { id: "loop-eip-customer-confidential-run" },
+        dataClassification: "customer-confidential"
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { requestId: "req_loop_eip_customer_confidential_run_loop_executor_step_1" }
+    });
+    await expect(
+      connector.submit({
+        ...submitRequest,
+        run: { id: "loop-eip-regulated-run" },
+        dataClassification: "regulated"
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { requestId: "req_loop_eip_regulated_run_loop_executor_step_1" }
+    });
+
+    expect(submittedPayloads).toMatchObject([
+      { dataClassification: "customer-confidential" },
+      { dataClassification: "regulated" }
+    ]);
+  });
+
   it("drives a workflow step through fake Ensen-loop EIP transport and persists the resulting run state", async () => {
     const transport = createFakeEnsenLoopEipExecutorTransport({
       completedAt: "2026-04-30T04:00:03.000Z",

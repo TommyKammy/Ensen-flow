@@ -78,7 +78,8 @@ describe("neutral audit event writer", () => {
           correlationId: "corr_manual_export",
           type: "local_path",
           uri: "artifacts/evidence/manual-export/bundle.json",
-          createdAt: "2026-04-29T00:00:03.000Z"
+          createdAt: "2026-04-29T00:00:03.000Z",
+          dataClassification: "public"
         }
       }
     });
@@ -279,7 +280,8 @@ describe("neutral audit event writer", () => {
             correlationId: "corr_manual_export",
             type: "local_path",
             uri: "artifacts/evidence/public/bundle.json",
-            createdAt: "2026-04-29T00:00:02.000Z"
+            createdAt: "2026-04-29T00:00:02.000Z",
+            dataClassification: "public"
           },
           {
             schemaVersion: "eip.evidence-bundle-ref.v1",
@@ -287,7 +289,8 @@ describe("neutral audit event writer", () => {
             correlationId: "corr_manual_export",
             type: "local_path",
             uri: windowsNetworkPath,
-            createdAt: "2026-04-29T00:00:02.000Z"
+            createdAt: "2026-04-29T00:00:02.000Z",
+            dataClassification: "public"
           },
           {
             schemaVersion: "eip.evidence-bundle-ref.v1",
@@ -295,7 +298,8 @@ describe("neutral audit event writer", () => {
             correlationId: "corr_manual_export",
             type: "file_uri",
             uri: "file://server/share/bundle.json",
-            createdAt: "2026-04-29T00:00:02.000Z"
+            createdAt: "2026-04-29T00:00:02.000Z",
+            dataClassification: "public"
           },
           {
             schemaVersion: "eip.evidence-bundle-ref.v1",
@@ -303,7 +307,8 @@ describe("neutral audit event writer", () => {
             correlationId: "corr_manual_export",
             type: "file_uri",
             uri: posixHostFileUri,
-            createdAt: "2026-04-29T00:00:02.000Z"
+            createdAt: "2026-04-29T00:00:02.000Z",
+            dataClassification: "public"
           }
         ]
       }
@@ -447,6 +452,55 @@ describe("neutral audit event writer", () => {
 
     await expect(createAuditEvidenceExport({ statePath, outputPath })).rejects.toThrow(
       'evidence ref evb_unknown_classification_export has unsupported dataClassification "partner-private"'
+    );
+    await expect(readFile(outputPath, "utf8")).rejects.toThrow();
+  });
+
+  it("rejects missing evidence data classifications before writing an export artifact", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const exportRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, exportRoot);
+    const statePath = join(stateRoot, "runs", "manual-run.jsonl");
+    const outputPath = join(exportRoot, "exports", "audit-evidence.json");
+
+    await createWorkflowRun(statePath, {
+      runId: "local-manual-demo-export",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "local-manual-demo-export",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        evidenceBundleRef: {
+          schemaVersion: "eip.evidence-bundle-ref.v1",
+          id: "evb_missing_classification_export",
+          correlationId: "corr_manual_export",
+          type: "local_path",
+          uri: "artifacts/evidence/public/bundle.json",
+          createdAt: "2026-04-29T00:00:03.000Z"
+        }
+      }
+    });
+
+    await expect(createAuditEvidenceExport({ statePath, outputPath })).rejects.toThrow(
+      "evidence ref evb_missing_classification_export is missing required dataClassification"
     );
     await expect(readFile(outputPath, "utf8")).rejects.toThrow();
   });

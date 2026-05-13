@@ -164,7 +164,17 @@ const isEmptyPublicPlaceholder = (value: unknown): boolean =>
   value === undefined ||
   value === null ||
   value === "" ||
-  (Array.isArray(value) && value.length === 0);
+  (Array.isArray(value) && value.length === 0) ||
+  isEmptyPlainObject(value);
+
+const isEmptyPlainObject = (value: unknown): boolean => {
+  if (!isRecord(value) || Object.keys(value).length !== 0) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
 
 export const formatUnsafeWorkflowArtifactDiagnostic = (
   finding: UnsafeWorkflowArtifactFinding

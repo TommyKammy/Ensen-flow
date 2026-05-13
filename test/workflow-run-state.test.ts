@@ -597,6 +597,31 @@ describe("workflow run JSONL state", () => {
     }
   );
 
+  it.each([
+    { context: { connectorConfig: { apiKey: {} } } },
+    { context: { connectorConfig: { credentials: {} } } },
+    { context: { intake: { patientId: {} } } },
+    { context: { intake: { customerEmail: {} } } }
+  ])("allows empty object placeholders for sensitive trigger fields %#", async ({ context }) => {
+    const statePath = await createTempStatePath();
+
+    await createWorkflowRun(statePath, {
+      runId: "run-empty-sensitive-placeholder",
+      workflowId: "operator-review",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+
+    const state = await readWorkflowRunState(statePath);
+
+    expect(state.run.trigger.context).toEqual(context);
+  });
+
   it.each(["succeeded", "failed", "canceled", "retryable-failed"] as const)(
     "represents %s as a distinct terminal state",
     async (terminalState) => {

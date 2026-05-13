@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 const runbookPath = "docs/controlled-pilot-rollback-recovery-runbook.md";
+const customerWorkflowRunbookPath =
+  "docs/customer-workflow-rollback-evidence-retention-runbook.md";
 const flowClosurePath = "docs/x-gate3-track-a-flow-closure.md";
 const readmePath = "README.md";
 const docsIndexPath = "docs/README.md";
@@ -23,6 +25,20 @@ describe("documentation navigation", () => {
 
     expect(readme).toContain("docs/controlled-pilot-rollback-recovery-runbook.md");
     expect(docsIndex).toContain("controlled-pilot-rollback-recovery-runbook.md");
+  });
+
+  it("links the customer workflow rollback and evidence retention runbook from public docs", async () => {
+    const [readme, docsIndex] = await Promise.all([
+      readFile(readmePath, "utf8"),
+      readFile(docsIndexPath, "utf8")
+    ]);
+
+    expect(readme).toContain(
+      "docs/customer-workflow-rollback-evidence-retention-runbook.md"
+    );
+    expect(docsIndex).toContain(
+      "customer-workflow-rollback-evidence-retention-runbook.md"
+    );
   });
 
   it("links the Protocol v0.3.0 operational evidence profile snapshot from public docs", async () => {
@@ -163,6 +179,52 @@ describe("documentation navigation", () => {
       "node dist/index.js issue-lint <this-issue-number>"
     ]) {
       expect(runbook).toContain(requiredText);
+    }
+
+    expect(runbook).not.toMatch(posixHomeRootPattern);
+    expect(runbook).not.toMatch(linuxHomeRootPattern);
+    expect(runbook).not.toMatch(windowsHomeRootPattern);
+  });
+
+  it("documents customer workflow rollback and evidence retention without unsafe claims or host-local paths", async () => {
+    const runbook = await readFile(customerWorkflowRunbookPath, "utf8");
+
+    for (const requiredText of [
+      "Customer Workflow Rollback and Evidence Retention Runbook",
+      "Track B",
+      "retry",
+      "re-run",
+      "abandon",
+      "manual repair",
+      "revoke",
+      "supersede",
+      "partial failure",
+      "notification misfire",
+      "draft revocation",
+      "customer workflow abort",
+      "audit export",
+      "notification recovery",
+      "draft artifact recovery",
+      "workflow state recovery",
+      "retained evidence",
+      "deleted local artifact",
+      "Pharma workflow packs remain out of scope",
+      "does not claim production readiness",
+      "does not claim compliance readiness",
+      "does not claim live ERPNext write-back support",
+      "CODEX_SUPERVISOR_CONFIG=<supervisor-config-path>",
+      "node dist/index.js issue-lint <this-issue-number>"
+    ]) {
+      expect(runbook).toContain(requiredText);
+    }
+
+    for (const forbiddenText of [
+      "validated system readiness",
+      "production compliance",
+      "customer SOP coverage",
+      "live ERPNext write-back is ready"
+    ]) {
+      expect(runbook).not.toContain(forbiddenText);
     }
 
     expect(runbook).not.toMatch(posixHomeRootPattern);

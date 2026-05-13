@@ -1794,6 +1794,8 @@ const isDataClassification = (value: unknown): boolean =>
   value === "public" ||
   value === "internal" ||
   value === "confidential" ||
+  value === "customer-confidential" ||
+  value === "regulated" ||
   value === "restricted";
 
 const validateSourceRef = (

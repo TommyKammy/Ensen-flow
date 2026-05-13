@@ -128,7 +128,7 @@ type NormalizedEvidenceRef = Omit<
   AuditEvidenceExportEvidenceRef,
   "dataClassification" | "referenceKind"
 > & {
-  dataClassification: EvidenceDataClassification;
+  dataClassification: EvidenceDataClassification | undefined;
   referenceKind: "publicSafeArtifactReference" | "localConfidentialReference";
 };
 
@@ -438,8 +438,12 @@ const normalizeEvidenceRef = (
 const normalizeDataClassification = (
   value: unknown,
   evidenceRefId: string
-): EvidenceDataClassification => {
-  if (value === undefined || value === "public") {
+): EvidenceDataClassification | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "public") {
     return "public";
   }
 
@@ -522,6 +526,10 @@ const isSafeRelativePath = (value: string): boolean => {
 };
 
 const createUnsafeEvidenceRefDiagnostic = (ref: NormalizedEvidenceRef): string => {
+  if (ref.dataClassification === undefined) {
+    return "omitted an evidence reference because its data classification is missing";
+  }
+
   if (ref.dataClassification !== "public") {
     return "omitted an evidence reference because its data classification is not public-safe";
   }

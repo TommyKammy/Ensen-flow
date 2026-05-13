@@ -1,8 +1,11 @@
 export type UnsafeWorkflowArtifactCategory =
   | "secret"
+  | "credential"
   | "token"
   | "private-key"
   | "session-cookie"
+  | "regulated-content"
+  | "customer-identifier"
   | "workstation-local-path";
 
 export interface UnsafeWorkflowArtifactFinding {
@@ -18,8 +21,44 @@ const SECRET_ASSIGNMENT_PATTERN =
 const TOKEN_ASSIGNMENT_PATTERN = /(?:^|\b)token\s*[:=]/iu;
 const SESSION_COOKIE_PATTERN =
   /(?:^|\b)(?:cookie|set-cookie)\s*:\s*[^;\n]*(?:session|sid)=|(?:^|\b)(?:sessionid|session_id|sid)\s*=/iu;
+const REGULATED_CONTENT_ASSIGNMENT_PATTERN =
+  /(?:^|\b)(?:ssn|social[_ -]?security[_ -]?number|patient[_ -]?id|patient[_ -]?name|medical[_ -]?record[_ -]?number|mrn)\s*[:=]/iu;
+const CUSTOMER_IDENTIFIER_ASSIGNMENT_PATTERN =
+  /(?:^|\b)(?:customer[_ -]?id|customer[_ -]?name|customer[_ -]?email|account[_ -]?number)\s*[:=]/iu;
 const WORKSTATION_LOCAL_PATH_PATTERN =
   /(?:^|["'\s])(?:\/(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/[^/\\\s]+|[A-Za-z]:[\\/][^/\\\s]+|file:\/\/\/(?:[A-Za-z]:\/|(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/)[^/\\\s]+)/u;
+const CREDENTIAL_FIELD_KEYS = new Set([
+  "authorization",
+  "proxyauthorization",
+  "cookie",
+  "setcookie",
+  "password",
+  "passwd",
+  "secret",
+  "clientsecret",
+  "apikey",
+  "accesskey",
+  "privatekey",
+  "token",
+  "sessioncookie",
+  "sessionid",
+  "credential",
+  "credentials"
+]);
+const REGULATED_FIELD_KEYS = new Set([
+  "ssn",
+  "socialsecuritynumber",
+  "patientid",
+  "patientname",
+  "medicalrecordnumber",
+  "mrn"
+]);
+const CUSTOMER_IDENTIFIER_FIELD_KEYS = new Set([
+  "customerid",
+  "customername",
+  "customeremail",
+  "accountnumber"
+]);
 
 export const findUnsafeWorkflowArtifactValue = (
   value: unknown,
@@ -42,9 +81,15 @@ export const findUnsafeWorkflowArtifactValue = (
 
   if (isRecord(value)) {
     for (const [key, nestedValue] of Object.entries(value)) {
-      const nested = findUnsafeWorkflowArtifactValue(nestedValue, `${path}.${key}`);
+      const nestedPath = `${path}.${key}`;
+      const nested = findUnsafeWorkflowArtifactValue(nestedValue, nestedPath);
       if (nested !== undefined) {
         return nested;
+      }
+
+      const keyedCategory = classifyUnsafeWorkflowArtifactKey(key, nestedValue);
+      if (keyedCategory !== undefined) {
+        return { path: nestedPath, category: keyedCategory };
       }
     }
   }
@@ -67,6 +112,14 @@ export const classifyUnsafeWorkflowArtifactString = (
     return "session-cookie";
   }
 
+  if (REGULATED_CONTENT_ASSIGNMENT_PATTERN.test(value)) {
+    return "regulated-content";
+  }
+
+  if (CUSTOMER_IDENTIFIER_ASSIGNMENT_PATTERN.test(value)) {
+    return "customer-identifier";
+  }
+
   if (SECRET_ASSIGNMENT_PATTERN.test(value)) {
     return "secret";
   }
@@ -77,6 +130,41 @@ export const classifyUnsafeWorkflowArtifactString = (
 
   return undefined;
 };
+
+const classifyUnsafeWorkflowArtifactKey = (
+  key: string,
+  value: unknown
+): UnsafeWorkflowArtifactCategory | undefined => {
+  if (isEmptyPublicPlaceholder(value)) {
+    return undefined;
+  }
+
+  const normalized = normalizeArtifactKey(key);
+  if (CREDENTIAL_FIELD_KEYS.has(normalized)) {
+    return normalized === "cookie" || normalized === "setcookie" || normalized === "sessioncookie"
+      ? "session-cookie"
+      : "credential";
+  }
+
+  if (REGULATED_FIELD_KEYS.has(normalized)) {
+    return "regulated-content";
+  }
+
+  if (CUSTOMER_IDENTIFIER_FIELD_KEYS.has(normalized)) {
+    return "customer-identifier";
+  }
+
+  return undefined;
+};
+
+const normalizeArtifactKey = (key: string): string =>
+  key.replaceAll(/[^A-Za-z0-9]/gu, "").toLowerCase();
+
+const isEmptyPublicPlaceholder = (value: unknown): boolean =>
+  value === undefined ||
+  value === null ||
+  value === "" ||
+  (Array.isArray(value) && value.length === 0);
 
 export const formatUnsafeWorkflowArtifactDiagnostic = (
   finding: UnsafeWorkflowArtifactFinding

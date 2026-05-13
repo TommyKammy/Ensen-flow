@@ -6,6 +6,10 @@ import { validateWorkflowDefinition } from "./workflow-definition.js";
 import type { WorkflowDefinition } from "./workflow-definition.js";
 import { runWorkflow } from "./workflow-runner.js";
 import type { WorkflowStepHandler } from "./workflow-runner.js";
+import {
+  findUnsafeWorkflowArtifactValue,
+  formatUnsafeWorkflowArtifactDiagnostic
+} from "./workflow-artifact-hygiene.js";
 
 const WEBHOOK_INPUT_SCHEMA_VERSION = "flow.webhook.input.v1";
 const MAX_HEADER_COUNT = 20;
@@ -176,6 +180,7 @@ const normalizeWebhookInput = (value: unknown, expectedPath: string): WebhookInp
   }
   validateBoundedJson(value.payload, "webhook input payload", 0);
   rejectCredentialShapedKeys(value.payload, "webhook input payload");
+  rejectUnsafeWebhookArtifactValues(value.payload, "webhook input payload");
 
   return {
     schemaVersion: WEBHOOK_INPUT_SCHEMA_VERSION,
@@ -300,6 +305,13 @@ const rejectCredentialShapedValue = (value: unknown, path: string): void => {
 
 const rejectCredentialShapedKeys = (value: Record<string, unknown>, path: string): void => {
   rejectCredentialShapedValue(value, path);
+};
+
+const rejectUnsafeWebhookArtifactValues = (value: unknown, path: string): void => {
+  const finding = findUnsafeWorkflowArtifactValue(value, path);
+  if (finding !== undefined) {
+    throw new WebhookIntakeRejectedError(formatUnsafeWorkflowArtifactDiagnostic(finding));
+  }
 };
 
 const assertWebhookInputMatchesState = (

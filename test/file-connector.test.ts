@@ -114,6 +114,72 @@ describe("local file connector skeleton", () => {
     expect(JSON.stringify(first)).not.toContain(fixtureRoot);
   });
 
+  it("rejects regulated-looking fixture writes before persisting content", async () => {
+    const fixtureRoot = await createTempRoot();
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }]
+    });
+    const unsafeContent = "patientId: patient-12345";
+
+    const result = await connector.submit({
+      workflowId: "file-demo",
+      runId: "file-demo-run",
+      stepId: "write-regulated-fixture",
+      idempotencyKey: "file-demo-run:write-regulated-fixture",
+      file: {
+        action: "write",
+        rootAlias: "fixture-root",
+        path: "outputs/regulated.txt",
+        content: unsafeContent
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid-request",
+        message:
+          "local file content must not contain unsafe workflow artifact values (category: regulated-content)",
+        retryable: false
+      }
+    });
+    await expect(readFile(join(fixtureRoot, "outputs", "regulated.txt"), "utf8")).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain(unsafeContent);
+  });
+
+  it("rejects unsafe fixture reads before returning connector output", async () => {
+    const fixtureRoot = await createTempRoot();
+    await mkdir(join(fixtureRoot, "inputs"), { recursive: true });
+    const unsafeContent = "customerEmail: private-customer@example.invalid";
+    await writeFile(join(fixtureRoot, "inputs", "customer.txt"), unsafeContent, "utf8");
+    const connector = createLocalFileConnector({
+      allowedRoots: [{ alias: "fixture-root", path: fixtureRoot }]
+    });
+
+    const result = await connector.submit({
+      workflowId: "file-demo",
+      runId: "file-demo-run",
+      stepId: "read-unsafe-fixture",
+      idempotencyKey: "file-demo-run:read-unsafe-fixture",
+      file: {
+        action: "read",
+        rootAlias: "fixture-root",
+        path: "inputs/customer.txt"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "execution-failed",
+        message:
+          "local file output must not contain unsafe workflow artifact values (category: customer-identifier)",
+        retryable: false
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain(unsafeContent);
+  });
+
   it("rejects changed replays from a shared idempotency store after connector recreation", async () => {
     const fixtureRoot = await createTempRoot();
     const idempotencyStore = createInMemoryLocalFileIdempotencyStore();

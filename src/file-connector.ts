@@ -17,6 +17,10 @@ import type {
   ConnectorResult,
   ConnectorSubmitRequest
 } from "./connector.js";
+import {
+  findUnsafeWorkflowArtifactValue,
+  formatUnsafeWorkflowArtifactDiagnostic
+} from "./workflow-artifact-hygiene.js";
 
 export type LocalFileAction = "read" | "write";
 
@@ -287,6 +291,18 @@ const createLocalFileReceipt = async (input: {
   if (!outcome.ok) {
     throw new LocalFileExecutionError(outcome.message, outcome.retryable);
   }
+  if (outcome.content !== undefined) {
+    const unsafeOutput = findUnsafeWorkflowArtifactValue(
+      outcome.content,
+      "local file output"
+    );
+    if (unsafeOutput !== undefined) {
+      throw new LocalFileExecutionError(
+        formatUnsafeWorkflowArtifactDiagnostic(unsafeOutput),
+        false
+      );
+    }
+  }
 
   const requestId = `${input.connectorId}-${input.request.runId}-${input.request.stepId}`;
   const acceptedAt = input.now();
@@ -398,6 +414,16 @@ const validateSubmitRequest = (request: LocalFileSubmitRequest): string | undefi
 
   if (request.file.action === "read" && request.file.content !== undefined) {
     return "local file read request must not include content";
+  }
+
+  if (request.file.content !== undefined) {
+    const unsafeContent = findUnsafeWorkflowArtifactValue(
+      request.file.content,
+      "local file content"
+    );
+    if (unsafeContent !== undefined) {
+      return formatUnsafeWorkflowArtifactDiagnostic(unsafeContent);
+    }
   }
 
   return undefined;

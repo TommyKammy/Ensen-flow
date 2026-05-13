@@ -36,6 +36,18 @@ const NON_COMMITTED_APPROVAL_STATES = new Set<CustomerWorkflowApprovalState>([
   "superseded"
 ]);
 
+const CUSTOMER_WORKFLOW_OUTPUT_BOUNDARY_KEYS = [
+  "automaticQualityDecision",
+  "customerWorkflowArtifact",
+  "customerWorkflowArtifacts",
+  "decisionType",
+  "externalApplicationState",
+  "finalQualityDecisionSource",
+  "liveWriteBack",
+  "qualityDecisionSource",
+  "writeBack"
+] as const;
+
 export const assertCustomerWorkflowApprovalBoundary = (input: {
   triggerContext: Record<string, unknown>;
   stepResult: WorkflowStepAttemptResultMetadata | undefined;
@@ -45,15 +57,15 @@ export const assertCustomerWorkflowApprovalBoundary = (input: {
     return;
   }
 
-  const executorResult = resolveExecutorResult(input.stepResult);
-  if (executorResult === undefined) {
+  const executorOutput = resolveExecutorOutput(input.stepResult);
+  if (executorOutput === undefined) {
     return;
   }
 
-  assertNoAutomaticQualityDecision(executorResult);
-  assertNoLiveWriteBack(executorResult);
+  assertNoAutomaticQualityDecision(executorOutput);
+  assertNoLiveWriteBack(executorOutput);
 
-  for (const artifact of resolveCustomerWorkflowArtifacts(executorResult)) {
+  for (const artifact of resolveCustomerWorkflowArtifacts(executorOutput)) {
     assertArtifactBoundary({
       artifact,
       mode: customerWorkflow.mode
@@ -69,9 +81,9 @@ const assertArtifactBoundary = (input: {
   const approvalState = parseApprovalState(input.artifact.approvalState);
   const externalApplicationState = input.artifact.externalApplicationState;
 
-  if (externalApplicationState === "applied") {
+  if (externalApplicationState !== "not-applied") {
     throw new Error(
-      "customer workflow artifacts cannot claim live write-back or external application"
+      "customer workflow artifacts must remain not-applied in read-only or draft-only mode"
     );
   }
 
@@ -86,8 +98,8 @@ const assertArtifactBoundary = (input: {
       );
     }
 
-    if (approvalState === "approved") {
-      throw new Error("read-only customer workflow mode cannot record approval as committed");
+    if (approvalState !== undefined) {
+      throw new Error("read-only customer workflow mode cannot record approval lifecycle states");
     }
     return;
   }
@@ -147,7 +159,7 @@ const assertNoLiveWriteBack = (result: Record<string, unknown>): void => {
   }
 };
 
-const resolveExecutorResult = (
+const resolveExecutorOutput = (
   stepResult: WorkflowStepAttemptResultMetadata
 ): Record<string, unknown> | undefined => {
   const executor = stepResult.executor;
@@ -155,22 +167,53 @@ const resolveExecutorResult = (
     return undefined;
   }
 
-  return executor.result;
+  assertNoBoundaryFieldsOutsideOutput(executor.result);
+
+  if (executor.result.output === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(executor.result.output)) {
+    throw new Error("customer workflow executor result output must be an object");
+  }
+
+  return executor.result.output;
 };
 
 const resolveCustomerWorkflowArtifacts = (
   result: Record<string, unknown>
 ): CustomerWorkflowApprovalBoundaryArtifact[] => {
   const artifacts: CustomerWorkflowApprovalBoundaryArtifact[] = [];
-  if (isRecord(result.customerWorkflowArtifact)) {
+
+  if ("customerWorkflowArtifact" in result) {
+    if (!isRecord(result.customerWorkflowArtifact)) {
+      throw new Error("customer workflow artifact must be an object");
+    }
     artifacts.push(result.customerWorkflowArtifact);
   }
 
-  if (Array.isArray(result.customerWorkflowArtifacts)) {
-    artifacts.push(...result.customerWorkflowArtifacts.filter(isRecord));
+  if ("customerWorkflowArtifacts" in result) {
+    if (!Array.isArray(result.customerWorkflowArtifacts)) {
+      throw new Error("customer workflow artifacts must be an array of objects");
+    }
+
+    for (const artifact of result.customerWorkflowArtifacts) {
+      if (!isRecord(artifact)) {
+        throw new Error("customer workflow artifacts must be an array of objects");
+      }
+      artifacts.push(artifact);
+    }
   }
 
   return artifacts;
+};
+
+const assertNoBoundaryFieldsOutsideOutput = (result: Record<string, unknown>): void => {
+  for (const key of CUSTOMER_WORKFLOW_OUTPUT_BOUNDARY_KEYS) {
+    if (key in result) {
+      throw new Error("customer workflow boundary fields must be provided in executor result output");
+    }
+  }
 };
 
 const parseApprovalState = (

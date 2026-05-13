@@ -27,23 +27,11 @@ const CUSTOMER_IDENTIFIER_ASSIGNMENT_PATTERN =
   /(?:^|\b)(?:customer[_ -]?id|customer[_ -]?name|customer[_ -]?email|account[_ -]?number)\s*["']?\s*[:=]/iu;
 const WORKSTATION_LOCAL_PATH_PATTERN =
   /(?:^|["'\s])(?:\/(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/[^/\\\s]+|[A-Za-z]:[\\/][^/\\\s]+|file:\/\/\/(?:[A-Za-z]:\/|(?:Users|home|var|tmp|opt|etc|srv|mnt|root|Volumes|usr)\/)[^/\\\s]+)/u;
-const CREDENTIAL_FIELD_KEYS = new Set([
-  "authorization",
-  "proxyauthorization",
+const SESSION_COOKIE_FIELD_KEYS = new Set([
   "cookie",
   "setcookie",
-  "password",
-  "passwd",
-  "secret",
-  "clientsecret",
-  "apikey",
-  "accesskey",
-  "privatekey",
-  "token",
   "sessioncookie",
-  "sessionid",
-  "credential",
-  "credentials"
+  "sessionid"
 ]);
 const REGULATED_FIELD_KEYS = new Set([
   "ssn",
@@ -166,12 +154,6 @@ const classifyUnsafeWorkflowArtifactKey = (
     return tokenBearingCategory;
   }
 
-  if (CREDENTIAL_FIELD_KEYS.has(normalized)) {
-    return normalized === "cookie" || normalized === "setcookie" || normalized === "sessioncookie"
-      ? "session-cookie"
-      : "credential";
-  }
-
   const credentialBearingCategory = classifyCredentialBearingArtifactKey(normalized);
   if (credentialBearingCategory !== undefined) {
     return credentialBearingCategory;
@@ -206,6 +188,10 @@ const classifyTokenBearingArtifactKey = (
 const classifyCredentialBearingArtifactKey = (
   normalizedKey: string
 ): UnsafeWorkflowArtifactCategory | undefined => {
+  if (SESSION_COOKIE_FIELD_KEYS.has(normalizedKey)) {
+    return "session-cookie";
+  }
+
   if (!CREDENTIAL_BEARING_FIELD_KEY_MARKERS.some((marker) => normalizedKey.includes(marker))) {
     return undefined;
   }

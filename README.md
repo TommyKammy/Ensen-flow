@@ -159,6 +159,13 @@ different input fingerprint. These records are pilot control facts only, not
 electronic signatures, production approvals, final disposition decisions, or
 compliance evidence.
 
+After `npm run build`, the same selected pilot can be run through the local
+fake transport with a repeatable CLI command:
+
+```sh
+node dist/cli.js run-controlled-pilot fixtures/controlled-pilot/webhook-review-notification.dry-run.json <state-root> [audit-jsonl-path]
+```
+
 The built CLI can export public-safe audit and evidence metadata from local run
 state after `npm run build`:
 

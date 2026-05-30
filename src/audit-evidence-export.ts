@@ -217,6 +217,7 @@ export const createAuditEvidenceExport = async (
       : await readNeutralAuditEvents(input.auditPath).catch((error: unknown) => {
           throw new Error(`audit event export failed: ${safeErrorMessage(error)}`);
         });
+  const runAuditEvents = filterAuditEventsForRun(state, auditEvents);
   const exportArtifact: AuditEvidenceExport = {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     boundary: {
@@ -286,9 +287,9 @@ export const createAuditEvidenceExport = async (
             })
       },
       steps: summarizeStepAttempts(state),
-      auditEvents: auditEvents.map(summarizeAuditEvent),
+      auditEvents: runAuditEvents.map(summarizeAuditEvent),
       evidenceRefs: collectPublicEvidenceRefs(state, diagnostics),
-      recoveryReplay: createRecoveryReplaySummary(state, auditEvents),
+      recoveryReplay: createRecoveryReplaySummary(state, runAuditEvents),
       diagnostics
     },
     localConfidentialReferences: {
@@ -322,6 +323,15 @@ export const createAuditEvidenceExport = async (
 
   return exportArtifact;
 };
+
+const filterAuditEventsForRun = (
+  state: WorkflowRunState,
+  auditEvents: NeutralAuditEvent[]
+): NeutralAuditEvent[] =>
+  auditEvents.filter(
+    (event) =>
+      event.run.id === state.run.runId && event.workflow.id === state.run.workflowId
+  );
 
 const summarizeStepAttempts = (
   state: WorkflowRunState

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -785,6 +785,43 @@ describe("selected controlled pilot dry-run package", () => {
       ])
     });
     const approvedStatePath = join(approvedStateRoot, `${approved.run.runId}.jsonl`);
+    const aggregateAuditEvents = [
+      {
+        id: "audit.other-controlled-pilot-run.000001",
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:10.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: approved.run.workflowId,
+          version: approved.run.workflowVersion
+        },
+        run: { id: "other-controlled-pilot-run" },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      },
+      {
+        id: `audit.${approved.run.runId}.999999`,
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:11.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: "other-controlled-pilot-workflow",
+          version: approved.run.workflowVersion
+        },
+        run: { id: approved.run.runId },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      }
+    ];
+    await writeFile(
+      approvedAuditPath,
+      `${await readFile(approvedAuditPath, "utf8")}${aggregateAuditEvents
+        .map((event) => JSON.stringify(event))
+        .join("\n")}\n`,
+      "utf8"
+    );
 
     const approvedExport = await createAuditEvidenceExport({
       statePath: approvedStatePath,
@@ -866,6 +903,12 @@ describe("selected controlled pilot dry-run package", () => {
         `audit.${approved.run.runId}.000008`
       ]
     ]);
+    expect(approvedExport.publicSafe.auditEvents.map((event) => event.id)).not.toEqual(
+      expect.arrayContaining([
+        "audit.other-controlled-pilot-run.000001",
+        `audit.${approved.run.runId}.999999`
+      ])
+    );
     expect(JSON.stringify(approvedExport.publicSafe)).not.toContain(
       "local fake endpoint temporarily unavailable"
     );

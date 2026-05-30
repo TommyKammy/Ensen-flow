@@ -286,6 +286,7 @@ export const validateNeutralAuditApprovalContext = (
   approval: NeutralAuditApprovalContext
 ): void => {
   requireNonEmptyString(approval.checkpointId, "audit event approval.checkpointId");
+  rejectUnsafeAuditArtifactValues(approval.checkpointId, "audit event approval.checkpointId");
   if (
     approval.state !== "approval-required" &&
     approval.state !== "approved" &&

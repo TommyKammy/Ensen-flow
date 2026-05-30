@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 import {
   createFakeHttpNotificationTransport,
   createHttpNotificationConnector
 } from "./http-notification-connector.js";
+import { WorkflowStepNonRetryableError } from "./workflow-runner.js";
 import {
   consumeWebhookInput,
   createNormalizedWebhookInputFingerprint
@@ -96,11 +99,28 @@ export const createControlledPilotInputFingerprint = (
     selectedControlledPilotWebhookPath
   );
 
+export const createControlledPilotNotificationFingerprint = (
+  notification: ControlledPilotInputPackage["notification"]
+): string =>
+  createHash("sha256")
+    .update(
+      stableStringify({
+        endpointAlias: notification.endpointAlias,
+        method: notification.method ?? "POST",
+        headers: notification.headers ?? null,
+        payload: notification.payload ?? null
+      })
+    )
+    .digest("hex");
+
 export const runSelectedControlledPilot = async (
   input: RunSelectedControlledPilotInput
 ): Promise<WorkflowRunState> => {
   const normalizedPackage = validateControlledPilotInputPackage(input.inputPackage);
   const inputFingerprint = createControlledPilotInputFingerprint(normalizedPackage);
+  const notificationFingerprint = createControlledPilotNotificationFingerprint(
+    normalizedPackage.notification
+  );
   const approval = normalizeApprovalCheckpoint({
     approval: normalizedPackage.approval,
     inputRef: normalizedPackage.inputRef,
@@ -118,6 +138,13 @@ export const runSelectedControlledPilot = async (
     stateRoot: input.stateRoot,
     auditPath: input.auditPath,
     input: normalizedPackage.webhook,
+    additionalTriggerContext: {
+      controlledPilot: {
+        notificationFingerprint
+      }
+    },
+    existingRunStateGuard: (existingState) =>
+      assertControlledPilotNotificationMatchesState(existingState, notificationFingerprint),
     recoverApprovalRequiredStepIds: approval === undefined ? [] : ["human-approval"],
     now: input.now,
     stepHandler: async ({ step, runState, attempt }) => {
@@ -173,6 +200,9 @@ export const runSelectedControlledPilot = async (
       });
 
       if (!submitted.ok) {
+        if (submitted.error.retryable === false) {
+          throw new WorkflowStepNonRetryableError(submitted.error.message);
+        }
         throw new Error(submitted.error.message);
       }
 
@@ -291,6 +321,22 @@ const createRecordedApprovalCheckpoint = (
   inputFingerprint: approval.inputFingerprint
 });
 
+const assertControlledPilotNotificationMatchesState = (
+  existingState: WorkflowRunState,
+  notificationFingerprint: string
+): void => {
+  const controlledPilot = existingState.run.trigger.context?.controlledPilot;
+  if (!isRecord(controlledPilot) || typeof controlledPilot.notificationFingerprint !== "string") {
+    throw new Error(
+      "controlled pilot run state must include the notification fingerprint before approval recovery"
+    );
+  }
+
+  if (controlledPilot.notificationFingerprint !== notificationFingerprint) {
+    throw new Error("controlled pilot notification package must match the pending approval run");
+  }
+};
+
 const PACKAGE_ALLOWED_KEYS = new Set([
   "schemaVersion",
   "pilotId",
@@ -368,3 +414,18 @@ const isStrictUtcMillisTimestamp = (value: string): boolean => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+};

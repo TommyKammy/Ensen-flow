@@ -1247,6 +1247,68 @@ describe("sequential workflow runner", () => {
     );
   });
 
+  it("records failed attempts when non-success approval audit validation fails", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-malformed-non-success-approval"
+      },
+      now: createClock([
+        "2026-04-29T00:09:00.000Z",
+        "2026-04-29T00:09:01.000Z",
+        "2026-04-29T00:09:02.000Z",
+        "2026-04-29T00:09:03.000Z",
+        "2026-04-29T00:09:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_malformed_non_success_approval",
+          status: "approval-required",
+          observedAt: "2026-04-29T00:09:02.000Z",
+          result: {
+            status: "blocked",
+            summary: "malformed approval-required checkpoint should not block persistence",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-003",
+                state: "approval-required",
+                decidedAt: 42,
+                reason: "Approval is required.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "step handler approvalCheckpoint decidedAt is invalid"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
   it.each([
     {
       executorStatus: "succeeded",

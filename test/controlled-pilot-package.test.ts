@@ -169,6 +169,34 @@ describe("selected controlled pilot dry-run package", () => {
     expect(transport.deliveries).toHaveLength(0);
   });
 
+  it("rejects unsafe approval checkpoint IDs before notification", async () => {
+    const inputPackage = createPilotPackage();
+    inputPackage.approval!.checkpointId = ["tok", "en: placeholder"].join("");
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const result = await runSelectedControlledPilot({
+      inputPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["human-approval"][0]).toMatchObject({
+      status: "failed",
+      retry: {
+        retryable: false,
+        reason:
+          "step handler approvalCheckpoint is invalid: audit event approval.checkpointId must not contain unsafe workflow artifact values (category: token)"
+      }
+    });
+    expect(result.stepAttempts["human-approval"][0]?.result).toBeUndefined();
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
   it("fails closed before notification when the approval checkpoint is missing", async () => {
     const inputPackage = createPilotPackage();
     delete inputPackage.approval;
@@ -244,6 +272,51 @@ describe("selected controlled pilot dry-run package", () => {
     ).rejects.toThrow(
       "existing workflow run state has approval-required step human-approval#1; human approval is required before recovery"
     );
+
+    expect(pending.run.status).toBe("running");
+    await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
+    await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
+  it("rejects resumed approval when the notification package changed", async () => {
+    const pendingPackage = createPilotPackage();
+    delete pendingPackage.approval;
+    const changedPackage = createPilotPackage();
+    changedPackage.notification = {
+      ...changedPackage.notification,
+      payload: {
+        ...changedPackage.notification.payload,
+        message: "Synthetic dry-run notification updated after approval request."
+      }
+    };
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const pending = await runSelectedControlledPilot({
+      inputPackage: pendingPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+    const expectedRunId = createExpectedWebhookRunId(
+      "controlled-pilot-webhook-review-notification",
+      pendingPackage.webhook.requestId
+    );
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+    const stateBeforeReplay = await readFile(statePath, "utf8");
+    const auditBeforeReplay = await readFile(auditPath, "utf8");
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage: changedPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: transport
+      })
+    ).rejects.toThrow("controlled pilot notification package must match the pending approval run");
 
     expect(pending.run.status).toBe("running");
     await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
@@ -379,6 +452,42 @@ describe("selected controlled pilot dry-run package", () => {
         })
       ])
     );
+  });
+
+  it("does not retry non-retryable notification failures", async () => {
+    const inputPackage = createPilotPackage();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport({
+      outcomes: [
+        {
+          status: "failed",
+          summary: "local fake endpoint rejected notification permanently",
+          retryable: false
+        }
+      ]
+    });
+
+    const result = await runSelectedControlledPilot({
+      inputPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(transport.deliveries).toHaveLength(1);
+    expect(result.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "local fake endpoint rejected notification permanently"
+        }
+      }
+    ]);
   });
 
   it("rejects changed webhook input replay before appending state, audit, or notification records", async () => {

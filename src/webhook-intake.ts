@@ -63,6 +63,8 @@ export interface ConsumeWebhookInputOptions {
   stateRoot: string;
   auditPath?: string;
   input: WebhookInput;
+  additionalTriggerContext?: Record<string, unknown>;
+  existingRunStateGuard?: (existingState: WorkflowRunState) => void;
   recoverApprovalRequiredStepIds?: readonly string[];
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
@@ -101,6 +103,7 @@ export const consumeWebhookInput = async (
   const existingState = await readExistingWebhookRunState(statePath);
   if (existingState !== undefined) {
     assertWebhookInputMatchesState(existingState, inputFingerprint);
+    options.existingRunStateGuard?.(existingState);
   } else {
     rejectCredentialShapedKeys(normalizedInput.payload, "webhook input payload");
     rejectUnsafeWebhookArtifactValues(normalizedInput.payload, "webhook input payload");
@@ -119,11 +122,14 @@ export const consumeWebhookInput = async (
         receivedAt: normalizedInput.receivedAt,
         ...(normalizedInput.headers === undefined ? {} : { headers: normalizedInput.headers }),
         payload: normalizedInput.payload
-      }
+      },
+      ...(options.additionalTriggerContext ?? {})
     },
     existingRunStateArtifactHygiene: "skip",
-    existingRunStateGuard: (existingState) =>
-      assertWebhookInputMatchesState(existingState, inputFingerprint),
+    existingRunStateGuard: (existingState) => {
+      assertWebhookInputMatchesState(existingState, inputFingerprint);
+      options.existingRunStateGuard?.(existingState);
+    },
     recoverApprovalRequiredStepIds: options.recoverApprovalRequiredStepIds,
     now: options.now,
     stepHandler: options.stepHandler

@@ -79,6 +79,13 @@ interface NormalizedWorkflowStepHandlerResult extends WorkflowStepAttemptResultM
   executor: ExecutorConnectorStatusSnapshot;
 }
 
+export class WorkflowStepNonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkflowStepNonRetryableError";
+  }
+}
+
 export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunState> => {
   assertSupportedWorkflowEipProtocolVersion(input.definition);
 
@@ -275,9 +282,20 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
         break;
       } catch (error) {
         const stepResult = errorStepResult(error);
-        const recovery = recoveryDecisionFromStepResult(stepResult, error);
-        const approvalAuditContext = approvalAuditContextFromStepResult(stepResult);
-        const retryable = recovery === undefined && attempt < retryPolicy.maxAttempts;
+        let failedAttemptResult = stepResult;
+        let failedAttemptError = error;
+        let approvalAuditContext: NeutralAuditApprovalContext | undefined;
+        try {
+          approvalAuditContext = approvalAuditContextFromStepResult(stepResult);
+        } catch (approvalError) {
+          failedAttemptResult = undefined;
+          failedAttemptError = approvalError;
+        }
+        const recovery = recoveryDecisionFromStepResult(failedAttemptResult, failedAttemptError);
+        const retryable =
+          recovery === undefined &&
+          !isWorkflowStepNonRetryableError(failedAttemptError) &&
+          attempt < retryPolicy.maxAttempts;
         const failedAt = now();
         const nextAttemptAt = retryable
           ? calculateNextAttemptAt(failedAt, retryPolicy, attempt)
@@ -291,9 +309,9 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           retry: {
             retryable,
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
-            reason: errorReason(error)
+            reason: errorReason(failedAttemptError)
           },
-          ...(stepResult === undefined ? {} : { result: stepResult }),
+          ...(failedAttemptResult === undefined ? {} : { result: failedAttemptResult }),
           ...(recovery === undefined ? {} : { recovery })
         });
         await writeStepAuditEvent(auditWriter, {
@@ -304,11 +322,11 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           retry: {
             retryable,
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
-            reason: errorReason(error)
+            reason: errorReason(failedAttemptError)
           },
           outcome: {
             status: auditOutcomeStatusFromRecovery(recovery),
-            reason: errorReason(error)
+            reason: errorReason(failedAttemptError)
           },
           approval: approvalAuditContext
         });
@@ -334,7 +352,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             occurredAt: completedAt,
             outcome: {
               status: auditOutcomeStatusFromRecovery(recovery),
-              reason: errorReason(error)
+              reason: errorReason(failedAttemptError)
             }
           });
           return readCurrentRunState();
@@ -348,7 +366,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           retry: {
             retryable,
             ...(nextAttemptAt === undefined ? {} : { nextAttemptAt }),
-            reason: errorReason(error)
+            reason: errorReason(failedAttemptError)
           }
         });
       }
@@ -401,6 +419,9 @@ const normalizeStepHandlerResult = (
 
 const errorStepResult = (error: unknown): WorkflowStepAttemptResultMetadata | undefined =>
   error instanceof WorkflowStepOutcomeError ? error.result : undefined;
+
+const isWorkflowStepNonRetryableError = (error: unknown): boolean =>
+  error instanceof WorkflowStepNonRetryableError;
 
 const approvalAuditContextFromStepResult = (
   stepResult: WorkflowStepAttemptResultMetadata | undefined

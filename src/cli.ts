@@ -1,17 +1,21 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import {
   createAuditEvidenceExport,
   loadWorkflowDefinitionFile,
+  runSelectedControlledPilot,
   runWorkflow
 } from "./index.js";
+import type { ControlledPilotInputPackage } from "./index.js";
 
 const printUsage = (): void => {
   console.error(
     [
       "Usage:",
       "  node dist/cli.js run <workflow-definition.json> <state.jsonl> [trigger-context-json]",
+      "  node dist/cli.js run-controlled-pilot <input-package.json> <state-root> [audit.jsonl]",
       "  node dist/cli.js export-audit-evidence <state.jsonl> [audit.jsonl] [--output <export.json>]"
     ].join("\n")
   );
@@ -22,6 +26,10 @@ export const runCli = async (argv: string[]): Promise<number> => {
 
   if (command === "run") {
     return runWorkflowCommand(argv.slice(1));
+  }
+
+  if (command === "run-controlled-pilot") {
+    return runControlledPilotCommand(argv.slice(1));
   }
 
   if (command === "export-audit-evidence") {
@@ -56,6 +64,41 @@ const runWorkflowCommand = async (argv: string[]): Promise<number> => {
         status: state.run.status,
         terminalState: state.run.terminalState,
         statePath
+      },
+      null,
+      2
+    )
+  );
+
+  return 0;
+};
+
+const runControlledPilotCommand = async (argv: string[]): Promise<number> => {
+  const [inputPackagePath, stateRoot, auditPath] = argv;
+
+  if (inputPackagePath === undefined || stateRoot === undefined || argv.length > 3) {
+    printUsage();
+    return 2;
+  }
+
+  const inputPackage = await readControlledPilotInputPackageFile(inputPackagePath);
+  const state = await runSelectedControlledPilot({
+    inputPackage,
+    stateRoot,
+    ...(auditPath === undefined ? {} : { auditPath })
+  });
+
+  console.log(
+    JSON.stringify(
+      {
+        pilotId: inputPackage.pilotId,
+        mode: inputPackage.mode,
+        runId: state.run.runId,
+        workflowId: state.run.workflowId,
+        status: state.run.status,
+        terminalState: state.run.terminalState,
+        stateRoot,
+        ...(auditPath === undefined ? {} : { auditPath })
       },
       null,
       2
@@ -114,6 +157,17 @@ const parseAuditEvidenceExportArgs = (
     ...(maybeAuditPath === undefined ? {} : { auditPath: maybeAuditPath }),
     outputPath: maybeOutputPath
   };
+};
+
+const readControlledPilotInputPackageFile = async (
+  inputPackagePath: string
+): Promise<ControlledPilotInputPackage> => {
+  const parsed = JSON.parse(await readFile(inputPackagePath, "utf8")) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("controlled pilot input package JSON must be an object");
+  }
+
+  return parsed as unknown as ControlledPilotInputPackage;
 };
 
 const parseTriggerContext = (

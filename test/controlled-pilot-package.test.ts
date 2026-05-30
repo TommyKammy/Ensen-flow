@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { runCli } from "../src/cli.js";
 import {
   createControlledPilotInputFingerprint,
   createFakeHttpNotificationTransport,
@@ -15,6 +16,7 @@ import {
 import type {
   ControlledPilotInputPackage,
   FakeHttpNotificationTransport,
+  HttpNotificationOutcome,
   HttpNotificationTransport
 } from "../src/index.js";
 
@@ -113,6 +115,56 @@ describe("selected controlled pilot dry-run package", () => {
             inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
             reason: "Approve the synthetic webhook review notification dry-run."
           })
+        })
+      ])
+    );
+  });
+
+  it("runs the approved pilot through the repeatable CLI fake transport path", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown): void => {
+      logs.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "run-controlled-pilot",
+          "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+          stateRoot,
+          auditPath
+        ])
+      ).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = JSON.parse(logs.join("\n")) as Record<string, unknown>;
+    expect(output).toMatchObject({
+      pilotId: "webhook-review-notification",
+      mode: "dry-run",
+      workflowId: "controlled-pilot-webhook-review-notification",
+      status: "succeeded",
+      terminalState: "succeeded",
+      stateRoot,
+      auditPath
+    });
+
+    const runId = output.runId;
+    if (typeof runId !== "string") {
+      throw new Error("CLI output runId must be a string");
+    }
+    const state = await readWorkflowRunState(join(stateRoot, `${runId}.jsonl`));
+    expect(state.run.status).toBe("succeeded");
+    await expect(readAuditEvents(auditPath)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "workflow.completed",
+          outcome: { status: "succeeded" }
         })
       ])
     );
@@ -599,6 +651,40 @@ describe("selected controlled pilot dry-run package", () => {
         retry: {
           retryable: false,
           reason: "local fake endpoint rejected notification permanently"
+        }
+      }
+    ]);
+  });
+
+  it("fails closed when the dry-run transport returns malformed output", async () => {
+    const inputPackage = createPilotPackage();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport({
+      outcomes: [
+        {
+          status: "accepted",
+          summary: "malformed dry-run transport status"
+        } as unknown as HttpNotificationOutcome
+      ]
+    });
+
+    const result = await runSelectedControlledPilot({
+      inputPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "HTTP notification transport outcome status must be succeeded or failed"
         }
       }
     ]);

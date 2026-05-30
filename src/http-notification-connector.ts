@@ -217,6 +217,10 @@ export const createHttpNotificationConnector = (
             ? {}
             : { payload: request.notification.payload })
         });
+        const outcomeValidationError = validateHttpNotificationOutcome(outcome);
+        if (outcomeValidationError !== undefined) {
+          return invalidRequest(connectorId, outcomeValidationError);
+        }
 
         if (outcome.status === "failed") {
           return {
@@ -391,6 +395,32 @@ const validateSubmitRequest = (request: HttpNotificationSubmitRequest): string |
   );
   if (unsafeArtifact !== undefined) {
     return `HTTP notification fixture ${formatUnsafeWorkflowArtifactDiagnostic(unsafeArtifact)}`;
+  }
+
+  return undefined;
+};
+
+const validateHttpNotificationOutcome = (
+  outcome: HttpNotificationOutcome
+): string | undefined => {
+  if (!isRecord(outcome)) {
+    return "HTTP notification transport outcome must be an object";
+  }
+
+  if (outcome.status !== "succeeded" && outcome.status !== "failed") {
+    return "HTTP notification transport outcome status must be succeeded or failed";
+  }
+
+  if (outcome.summary !== undefined && typeof outcome.summary !== "string") {
+    return "HTTP notification transport outcome summary must be a string";
+  }
+
+  if (outcome.retryable !== undefined && typeof outcome.retryable !== "boolean") {
+    return "HTTP notification transport outcome retryable must be a boolean";
+  }
+
+  if (outcome.evidence !== undefined && !isRecord(outcome.evidence)) {
+    return "HTTP notification transport outcome evidence must be an object";
   }
 
   return undefined;

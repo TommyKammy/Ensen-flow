@@ -1175,6 +1175,78 @@ describe("sequential workflow runner", () => {
     );
   });
 
+  it("rejects malformed approval decidedAt before appending completed state", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-malformed-approval-date"
+      },
+      now: createClock([
+        "2026-04-29T00:08:00.000Z",
+        "2026-04-29T00:08:01.000Z",
+        "2026-04-29T00:08:02.000Z",
+        "2026-04-29T00:08:03.000Z",
+        "2026-04-29T00:08:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_malformed_approval_date",
+          status: "succeeded",
+          observedAt: "2026-04-29T00:08:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "malformed approval decidedAt should not be forwarded",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-002",
+                state: "approved",
+                decidedBy: "pilot-owner",
+                decidedAt: "2026-04-29T00:08:02Z",
+                reason: "Approval has a non-strict decision timestamp.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "step handler approvalCheckpoint is invalid: audit event approval.decidedAt must be an ISO timestamp string"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.status).toBe("failed");
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "step.completed"
+        })
+      ])
+    );
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
   it.each([
     {
       executorStatus: "succeeded",

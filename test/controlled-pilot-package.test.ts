@@ -35,6 +35,10 @@ const createExpectedWebhookRunId = (workflowId: string, requestId: string): stri
   return `${workflowId}-webhook-${slug}-${fingerprint}`;
 };
 
+const createRawWebhookInputFingerprint = (
+  webhook: ControlledPilotInputPackage["webhook"]
+): string => createHash("sha256").update(stableStringify(webhook)).digest("hex");
+
 const createTempRoot = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "ensen-flow-controlled-pilot-"));
   tempRoots.push(root);
@@ -140,6 +144,31 @@ describe("selected controlled pilot dry-run package", () => {
     });
   });
 
+  it("rejects approval bound to a raw webhook fingerprint before notification", async () => {
+    const inputPackage = createPilotPackage();
+    inputPackage.webhook.headers = {
+      "Content-Type": "application/json"
+    };
+    inputPackage.approval!.inputFingerprint = createRawWebhookInputFingerprint(
+      inputPackage.webhook
+    );
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: transport
+      })
+    ).rejects.toThrow("controlled pilot approval inputFingerprint must match the webhook input");
+
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
   it("fails closed before notification when the approval checkpoint is missing", async () => {
     const inputPackage = createPilotPackage();
     delete inputPackage.approval;
@@ -181,6 +210,45 @@ describe("selected controlled pilot dry-run package", () => {
         })
       ])
     );
+  });
+
+  it("does not resume an approval-required pilot run while approval is still missing", async () => {
+    const inputPackage = createPilotPackage();
+    delete inputPackage.approval;
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const pending = await runSelectedControlledPilot({
+      inputPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+    const expectedRunId = createExpectedWebhookRunId(
+      "controlled-pilot-webhook-review-notification",
+      inputPackage.webhook.requestId
+    );
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+    const stateBeforeReplay = await readFile(statePath, "utf8");
+    const auditBeforeReplay = await readFile(auditPath, "utf8");
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: transport
+      })
+    ).rejects.toThrow(
+      "existing workflow run state has approval-required step human-approval#1; human approval is required before recovery"
+    );
+
+    expect(pending.run.status).toBe("running");
+    await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
+    await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
+    expect(transport.deliveries).toHaveLength(0);
   });
 
   it("resumes the approval checkpoint after approval is supplied for the same dry-run input", async () => {
@@ -363,4 +431,21 @@ const createClock = (timestamps: string[]): (() => string) => {
   let index = 0;
 
   return () => timestamps[Math.min(index++, timestamps.length - 1)];
+};
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  );
+  return `{${entries
+    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
+    .join(",")}}`;
 };

@@ -1,4 +1,4 @@
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { WorkflowRunTerminalState } from "./workflow-run-state.js";
@@ -125,7 +125,7 @@ const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
 export const createLocalAuditEventWriter = (
   input: CreateLocalAuditEventWriterInput
 ): NeutralAuditEventWriter => {
-  let sequence = 0;
+  let sequence: number | undefined;
   const auditPath = input.auditPath;
   const actor = Object.freeze(
     input.actor === undefined
@@ -142,6 +142,7 @@ export const createLocalAuditEventWriter = (
 
   return {
     async write(eventInput) {
+      sequence ??= await readExistingAuditSequence(auditPath, run.id);
       sequence += 1;
       const step =
         eventInput.step === undefined ? undefined : Object.freeze({ ...eventInput.step });
@@ -173,6 +174,43 @@ export const createLocalAuditEventWriter = (
   };
 };
 
+const readExistingAuditSequence = async (
+  auditPath: string,
+  runId: string
+): Promise<number> => {
+  let content: string;
+  try {
+    content = await readFile(auditPath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return 0;
+    }
+
+    throw error;
+  }
+
+  if (content.trim() === "") {
+    return 0;
+  }
+
+  return content
+    .trimEnd()
+    .split("\n")
+    .reduce((max, line) => {
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed) || typeof parsed.id !== "string") {
+        return max;
+      }
+
+      const match = new RegExp(`^audit\\.${escapeRegExp(runId)}\\.(\\d+)$`).exec(parsed.id);
+      if (match === null) {
+        return max;
+      }
+
+      return Math.max(max, Number(match[1]));
+    }, 0);
+};
+
 const createAuditEventId = (runId: string, sequence: number): string =>
   `audit.${runId}.${String(sequence).padStart(6, "0")}`;
 
@@ -185,6 +223,14 @@ const appendAuditEvent = async (auditPath: string, event: NeutralAuditEvent): Pr
     await auditFile.close();
   }
 };
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
   if (!NEUTRAL_AUDIT_EVENT_TYPES.has(event.type)) {
@@ -236,7 +282,7 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
   }
 };
 
-const validateNeutralAuditApprovalContext = (
+export const validateNeutralAuditApprovalContext = (
   approval: NeutralAuditApprovalContext
 ): void => {
   requireNonEmptyString(approval.checkpointId, "audit event approval.checkpointId");
@@ -265,6 +311,20 @@ const validateNeutralAuditApprovalContext = (
 
   if (approval.decidedAt !== undefined) {
     requireIsoTimestamp(approval.decidedAt, "audit event approval.decidedAt");
+  }
+
+  if (approval.state === "approved" || approval.state === "rejected") {
+    if (approval.decidedBy === undefined) {
+      throw new Error(
+        "audit event approval.decidedBy is required for approved or rejected approval states"
+      );
+    }
+
+    if (approval.decidedAt === undefined) {
+      throw new Error(
+        "audit event approval.decidedAt is required for approved or rejected approval states"
+      );
+    }
   }
 };
 

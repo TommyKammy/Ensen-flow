@@ -601,7 +601,11 @@ const applyStepAttemptEvent = (
       );
     }
 
-    if (latestAttempt !== undefined && latestAttempt.status !== "retryable-failed") {
+    if (
+      latestAttempt !== undefined &&
+      latestAttempt.status !== "retryable-failed" &&
+      latestAttempt.status !== "approval-required"
+    ) {
       throw stateError(
         lineNumber,
         `workflow step attempt ${event.stepId}#${event.attempt}: step.attempt.started cannot follow ${latestAttempt.status}`

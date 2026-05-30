@@ -63,6 +63,7 @@ export interface ConsumeWebhookInputOptions {
   stateRoot: string;
   auditPath?: string;
   input: WebhookInput;
+  recoverApprovalRequiredStepIds?: readonly string[];
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
 }
@@ -75,6 +76,11 @@ export class WebhookIntakeRejectedError extends Error {
 }
 
 export const webhookInputSchemaVersion = WEBHOOK_INPUT_SCHEMA_VERSION;
+
+export const createNormalizedWebhookInputFingerprint = (
+  input: WebhookInput,
+  expectedPath: string
+): string => createWebhookInputFingerprint(normalizeWebhookInput(input, expectedPath));
 
 type WebhookWorkflowDefinition = WorkflowDefinition & {
   trigger: {
@@ -118,6 +124,7 @@ export const consumeWebhookInput = async (
     existingRunStateArtifactHygiene: "skip",
     existingRunStateGuard: (existingState) =>
       assertWebhookInputMatchesState(existingState, inputFingerprint),
+    recoverApprovalRequiredStepIds: options.recoverApprovalRequiredStepIds,
     now: options.now,
     stepHandler: options.stepHandler
   });

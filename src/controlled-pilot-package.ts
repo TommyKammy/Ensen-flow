@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
-
 import {
   createFakeHttpNotificationTransport,
   createHttpNotificationConnector
 } from "./http-notification-connector.js";
-import { consumeWebhookInput } from "./webhook-intake.js";
+import {
+  consumeWebhookInput,
+  createNormalizedWebhookInputFingerprint
+} from "./webhook-intake.js";
 import type {
   HttpNotificationTarget,
   HttpNotificationTransport
@@ -16,6 +17,7 @@ import type { WorkflowRunState } from "./workflow-run-state.js";
 export const controlledPilotInputPackageSchemaVersion =
   "flow.controlled-pilot.input-package.v1";
 export const selectedControlledPilotId = "webhook-review-notification";
+const selectedControlledPilotWebhookPath = "/hooks/controlled-pilot";
 
 export type ControlledPilotInputPackageMode = "dry-run";
 export type ControlledPilotApprovalState = "approved" | "rejected";
@@ -53,7 +55,7 @@ export const selectedControlledPilotWorkflowDefinition = (): WorkflowDefinition 
   id: "controlled-pilot-webhook-review-notification",
   trigger: {
     type: "webhook",
-    path: "/hooks/controlled-pilot",
+    path: selectedControlledPilotWebhookPath,
     idempotencyKey: {
       source: "input",
       field: "requestId",
@@ -88,13 +90,17 @@ export const selectedControlledPilotWorkflowDefinition = (): WorkflowDefinition 
 
 export const createControlledPilotInputFingerprint = (
   inputPackage: Pick<ControlledPilotInputPackage, "webhook">
-): string => createWebhookInputFingerprint(inputPackage.webhook);
+): string =>
+  createNormalizedWebhookInputFingerprint(
+    inputPackage.webhook,
+    selectedControlledPilotWebhookPath
+  );
 
 export const runSelectedControlledPilot = async (
   input: RunSelectedControlledPilotInput
 ): Promise<WorkflowRunState> => {
   const normalizedPackage = validateControlledPilotInputPackage(input.inputPackage);
-  const inputFingerprint = createWebhookInputFingerprint(normalizedPackage.webhook);
+  const inputFingerprint = createControlledPilotInputFingerprint(normalizedPackage);
   const approval = normalizeApprovalCheckpoint({
     approval: normalizedPackage.approval,
     inputRef: normalizedPackage.inputRef,
@@ -112,6 +118,7 @@ export const runSelectedControlledPilot = async (
     stateRoot: input.stateRoot,
     auditPath: input.auditPath,
     input: normalizedPackage.webhook,
+    recoverApprovalRequiredStepIds: approval === undefined ? [] : ["human-approval"],
     now: input.now,
     stepHandler: async ({ step, runState, attempt }) => {
       if (step.id === "human-approval") {
@@ -283,28 +290,6 @@ const createRecordedApprovalCheckpoint = (
   inputRef: approval.inputRef,
   inputFingerprint: approval.inputFingerprint
 });
-
-const createWebhookInputFingerprint = (input: WebhookInput): string =>
-  createHash("sha256")
-    .update(stableStringify(input))
-    .digest("hex");
-
-const stableStringify = (value: unknown): string => {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0
-  );
-  return `{${entries
-    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
-    .join(",")}}`;
-};
 
 const PACKAGE_ALLOWED_KEYS = new Set([
   "schemaVersion",

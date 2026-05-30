@@ -6,7 +6,10 @@ import {
   createWorkflowRun,
   readWorkflowRunState
 } from "./workflow-run-state.js";
-import { createLocalAuditEventWriter } from "./audit-event-writer.js";
+import {
+  createLocalAuditEventWriter,
+  validateNeutralAuditApprovalContext
+} from "./audit-event-writer.js";
 import type {
   NeutralAuditApprovalContext,
   NeutralAuditEventWriter
@@ -48,6 +51,7 @@ export interface RunWorkflowInput {
   triggerContext?: Record<string, unknown>;
   existingRunStateGuard?: (existingState: WorkflowRunState) => void;
   existingRunStateArtifactHygiene?: "enforce" | "skip";
+  recoverApprovalRequiredStepIds?: readonly string[];
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
 }
@@ -132,7 +136,11 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
     if (existingState.run.terminalState !== undefined) {
       return existingState;
     }
-    assertExistingRunRecoverable(existingState, orderedSteps);
+    assertExistingRunRecoverable(
+      existingState,
+      orderedSteps,
+      input.recoverApprovalRequiredStepIds
+    );
   } else {
     assertRequestedCustomerWorkflowAllowlisted(input.definition, triggerContext);
     const triggerReceivedAt = now();
@@ -168,7 +176,11 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
       if (competingState.run.terminalState !== undefined) {
         return competingState;
       }
-      assertExistingRunRecoverable(competingState, orderedSteps);
+      assertExistingRunRecoverable(
+        competingState,
+        orderedSteps,
+        input.recoverApprovalRequiredStepIds
+      );
     }
     if (createdNewRun) {
       await auditWriter?.write({
@@ -181,19 +193,25 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
   for (const step of orderedSteps) {
     const retryPolicy = step.retry ?? { maxAttempts: 1, backoff: { strategy: "none" as const } };
     const latestAttempt = latestStepAttempt((await readCurrentRunState()).stepAttempts[step.id]);
+    const resumeAfterApprovalRequired =
+      latestAttempt?.status === "approval-required" &&
+      input.recoverApprovalRequiredStepIds?.includes(step.id) === true;
     if (latestAttempt?.status === "succeeded") {
       continue;
     }
 
     const firstAttempt =
-      latestAttempt?.status === "retryable-failed" ? latestAttempt.attempt + 1 : 1;
-    if (firstAttempt > retryPolicy.maxAttempts) {
+      latestAttempt?.status === "retryable-failed" || resumeAfterApprovalRequired
+        ? latestAttempt.attempt + 1
+        : 1;
+    const finalAttempt = resumeAfterApprovalRequired ? firstAttempt : retryPolicy.maxAttempts;
+    if (firstAttempt > retryPolicy.maxAttempts && !resumeAfterApprovalRequired) {
       throw new Error(
         `existing workflow run state cannot resume ${step.id}; retry policy has no remaining attempts`
       );
     }
 
-    for (let attempt = firstAttempt; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+    for (let attempt = firstAttempt; attempt <= finalAttempt; attempt += 1) {
       const startedAt = now();
       await appendRunEvent({
         type: "step.attempt.started",
@@ -235,6 +253,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           triggerContext: persistedTriggerContext,
           stepResult
         });
+        const approvalAuditContext = approvalAuditContextFromStepResult(stepResult);
 
         const completedAt = now();
         await appendRunEvent({
@@ -251,12 +270,13 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           stepId: step.id,
           attempt,
           outcome: { status: "succeeded" },
-          approval: approvalAuditContextFromStepResult(stepResult)
+          approval: approvalAuditContext
         });
         break;
       } catch (error) {
         const stepResult = errorStepResult(error);
         const recovery = recoveryDecisionFromStepResult(stepResult, error);
+        const approvalAuditContext = approvalAuditContextFromStepResult(stepResult);
         const retryable = recovery === undefined && attempt < retryPolicy.maxAttempts;
         const failedAt = now();
         const nextAttemptAt = retryable
@@ -290,7 +310,7 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
             status: auditOutcomeStatusFromRecovery(recovery),
             reason: errorReason(error)
           },
-          approval: approvalAuditContextFromStepResult(stepResult)
+          approval: approvalAuditContext
         });
 
         if (
@@ -399,15 +419,18 @@ const approvalAuditContextFromStepResult = (
     return undefined;
   }
 
+  if (approval.schemaVersion !== "flow.approval-checkpoint.v1") {
+    throw new Error("step handler approvalCheckpoint schemaVersion is invalid");
+  }
+
   if (
-    approval.schemaVersion !== "flow.approval-checkpoint.v1" ||
     typeof approval.checkpointId !== "string" ||
     typeof approval.state !== "string" ||
     typeof approval.reason !== "string" ||
     typeof approval.inputRef !== "string" ||
     typeof approval.inputFingerprint !== "string"
   ) {
-    return undefined;
+    throw new Error("step handler approvalCheckpoint has malformed audit fields");
   }
 
   if (
@@ -415,10 +438,18 @@ const approvalAuditContextFromStepResult = (
     approval.state !== "approved" &&
     approval.state !== "rejected"
   ) {
-    return undefined;
+    throw new Error("step handler approvalCheckpoint state is invalid");
   }
 
-  return {
+  if (approval.decidedBy !== undefined && typeof approval.decidedBy !== "string") {
+    throw new Error("step handler approvalCheckpoint decidedBy is invalid");
+  }
+
+  if (approval.decidedAt !== undefined && typeof approval.decidedAt !== "string") {
+    throw new Error("step handler approvalCheckpoint decidedAt is invalid");
+  }
+
+  const auditContext: NeutralAuditApprovalContext = {
     checkpointId: approval.checkpointId,
     state: approval.state as NeutralAuditApprovalContext["state"],
     reason: approval.reason,
@@ -427,6 +458,15 @@ const approvalAuditContextFromStepResult = (
     ...(typeof approval.decidedBy === "string" ? { decidedBy: approval.decidedBy } : {}),
     ...(typeof approval.decidedAt === "string" ? { decidedAt: approval.decidedAt } : {})
   };
+
+  try {
+    validateNeutralAuditApprovalContext(auditContext);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`step handler approvalCheckpoint is invalid: ${reason}`);
+  }
+
+  return auditContext;
 };
 
 const executorFailureReason = (executor: ExecutorConnectorStatusSnapshot): string => {
@@ -633,8 +673,10 @@ const assertPersistedRunCustomerWorkflowAllowlisted = (
 
 const assertExistingRunRecoverable = (
   existingState: WorkflowRunState,
-  orderedSteps: WorkflowStep[]
+  orderedSteps: WorkflowStep[],
+  recoverApprovalRequiredStepIds: readonly string[] | undefined
 ): void => {
+  const approvalRecoveryStepIds = new Set(recoverApprovalRequiredStepIds ?? []);
   let sawIncompleteStep = false;
 
   for (const step of orderedSteps) {
@@ -671,7 +713,10 @@ const assertExistingRunRecoverable = (
       );
     }
 
-    if (latestAttempt?.status === "approval-required") {
+    if (
+      latestAttempt?.status === "approval-required" &&
+      !approvalRecoveryStepIds.has(stepId)
+    ) {
       throw new Error(
         `existing workflow run state has approval-required step ${stepId}#${latestAttempt.attempt}; human approval is required before recovery`
       );

@@ -113,6 +113,33 @@ describe("selected controlled pilot dry-run package", () => {
     );
   });
 
+  it("binds approval to the normalized webhook input fingerprint", async () => {
+    const inputPackage = createPilotPackage();
+    inputPackage.webhook.headers = {
+      "Content-Type": "application/json"
+    };
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const result = await runSelectedControlledPilot({
+      inputPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(result.run.status).toBe("succeeded");
+    expect(transport.deliveries).toHaveLength(1);
+    expect(result.run.trigger.context?.webhook).toMatchObject({
+      headers: {
+        "content-type": "application/json"
+      },
+      inputFingerprint: inputPackage.approval!.inputFingerprint
+    });
+  });
+
   it("fails closed before notification when the approval checkpoint is missing", async () => {
     const inputPackage = createPilotPackage();
     delete inputPackage.approval;
@@ -150,6 +177,79 @@ describe("selected controlled pilot dry-run package", () => {
             state: "approval-required",
             inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
             reason: "human approval checkpoint is required before notification"
+          })
+        })
+      ])
+    );
+  });
+
+  it("resumes the approval checkpoint after approval is supplied for the same dry-run input", async () => {
+    const pendingPackage = createPilotPackage();
+    delete pendingPackage.approval;
+    const approvedPackage = createPilotPackage();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const pending = await runSelectedControlledPilot({
+      inputPackage: pendingPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(pending.run.status).toBe("running");
+    expect(transport.deliveries).toHaveLength(0);
+
+    const approved = await runSelectedControlledPilot({
+      inputPackage: approvedPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+
+    expect(approved.run.status).toBe("succeeded");
+    expect(transport.deliveries).toHaveLength(1);
+    expect(approved.stepAttempts["human-approval"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "approval-required"
+      },
+      {
+        attempt: 2,
+        status: "succeeded",
+        result: {
+          executor: {
+            result: {
+              output: {
+                approvalCheckpoint: {
+                  state: "approved",
+                  decidedBy: "pilot-owner",
+                  inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    ]);
+
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(new Set(auditEvents.map((event) => event.id)).size).toBe(auditEvents.length);
+    expect(auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "step.failed",
+          step: { id: "human-approval", attempt: 1 },
+          approval: expect.objectContaining({ state: "approval-required" })
+        }),
+        expect.objectContaining({
+          type: "step.completed",
+          step: { id: "human-approval", attempt: 2 },
+          approval: expect.objectContaining({
+            state: "approved",
+            decidedBy: "pilot-owner"
           })
         })
       ])

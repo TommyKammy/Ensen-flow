@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "flow.controlled-pilot.input-package.v1",
+  "pilotId": "webhook-review-notification",
+  "mode": "dry-run",
+  "inputRef": "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+  "webhook": {
+    "schemaVersion": "flow.webhook.input.v1",
+    "requestId": "pilot-webhook-001",
+    "path": "/hooks/controlled-pilot",
+    "receivedAt": "2026-05-30T00:00:00.000Z",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "payload": {
+      "eventType": "controlled-pilot.review-requested",
+      "subject": "placeholder-subject",
+      "dryRun": true
+    }
+  },
+  "approval": {
+    "checkpointId": "pilot-approval-001",
+    "state": "approved",
+    "decidedBy": "pilot-owner",
+    "decidedAt": "2026-05-30T00:00:01.000Z",
+    "reason": "Approve the synthetic webhook review notification dry-run.",
+    "inputRef": "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+    "inputFingerprint": "5452447e127d047728582ec4d033b18a2ca7489c779923a4cd2405e62c21563c"
+  },
+  "notification": {
+    "endpointAlias": "local-operator-notification",
+    "method": "POST",
+    "headers": {
+      "x-flow-fixture": "controlled-pilot"
+    },
+    "payload": {
+      "subject": "placeholder-subject",
+      "outcome": "dry-run-approved"
+    }
+  }
+}

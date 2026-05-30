@@ -57,6 +57,16 @@ export interface NeutralAuditOutcomeContext {
   reason?: string;
 }
 
+export interface NeutralAuditApprovalContext {
+  checkpointId: string;
+  state: "approval-required" | "approved" | "rejected";
+  reason: string;
+  inputRef: string;
+  inputFingerprint: string;
+  decidedBy?: string;
+  decidedAt?: string;
+}
+
 export interface NeutralAuditEvent {
   id: string;
   type: NeutralAuditEventType;
@@ -68,6 +78,7 @@ export interface NeutralAuditEvent {
   step?: NeutralAuditStepReference;
   retry?: NeutralAuditRetryContext;
   outcome?: NeutralAuditOutcomeContext;
+  approval?: NeutralAuditApprovalContext;
 }
 
 export interface NeutralAuditEventWriter {
@@ -138,6 +149,10 @@ export const createLocalAuditEventWriter = (
         eventInput.retry === undefined ? undefined : Object.freeze({ ...eventInput.retry });
       const outcome =
         eventInput.outcome === undefined ? undefined : Object.freeze({ ...eventInput.outcome });
+      const approval =
+        eventInput.approval === undefined
+          ? undefined
+          : Object.freeze({ ...eventInput.approval });
       const event: NeutralAuditEvent = {
         id: createAuditEventId(run.id, sequence),
         type: eventInput.type,
@@ -148,7 +163,8 @@ export const createLocalAuditEventWriter = (
         run,
         ...(step === undefined ? {} : { step }),
         ...(retry === undefined ? {} : { retry }),
-        ...(outcome === undefined ? {} : { outcome })
+        ...(outcome === undefined ? {} : { outcome }),
+        ...(approval === undefined ? {} : { approval })
       };
 
       validateNeutralAuditEvent(event);
@@ -213,6 +229,42 @@ const validateNeutralAuditEvent = (event: NeutralAuditEvent): void => {
   if (event.outcome?.reason !== undefined) {
     requireNonEmptyString(event.outcome.reason, "audit event outcome.reason");
     rejectUnsafeAuditArtifactValues(event.outcome.reason, "audit event outcome.reason");
+  }
+
+  if (event.approval !== undefined) {
+    validateNeutralAuditApprovalContext(event.approval);
+  }
+};
+
+const validateNeutralAuditApprovalContext = (
+  approval: NeutralAuditApprovalContext
+): void => {
+  requireNonEmptyString(approval.checkpointId, "audit event approval.checkpointId");
+  if (
+    approval.state !== "approval-required" &&
+    approval.state !== "approved" &&
+    approval.state !== "rejected"
+  ) {
+    throw new Error("audit event approval.state must be approval-required, approved, or rejected");
+  }
+
+  requireNonEmptyString(approval.reason, "audit event approval.reason");
+  requireNonEmptyString(approval.inputRef, "audit event approval.inputRef");
+  requireNonEmptyString(approval.inputFingerprint, "audit event approval.inputFingerprint");
+  rejectUnsafeAuditArtifactValues(approval.reason, "audit event approval.reason");
+  rejectUnsafeAuditArtifactValues(approval.inputRef, "audit event approval.inputRef");
+  rejectUnsafeAuditArtifactValues(
+    approval.inputFingerprint,
+    "audit event approval.inputFingerprint"
+  );
+
+  if (approval.decidedBy !== undefined) {
+    requireNonEmptyString(approval.decidedBy, "audit event approval.decidedBy");
+    rejectUnsafeAuditArtifactValues(approval.decidedBy, "audit event approval.decidedBy");
+  }
+
+  if (approval.decidedAt !== undefined) {
+    requireIsoTimestamp(approval.decidedAt, "audit event approval.decidedAt");
   }
 };
 

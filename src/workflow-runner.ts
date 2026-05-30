@@ -7,7 +7,10 @@ import {
   readWorkflowRunState
 } from "./workflow-run-state.js";
 import { createLocalAuditEventWriter } from "./audit-event-writer.js";
-import type { NeutralAuditEventWriter } from "./audit-event-writer.js";
+import type {
+  NeutralAuditApprovalContext,
+  NeutralAuditEventWriter
+} from "./audit-event-writer.js";
 import type {
   ExecutorConnectorStatusSnapshot,
   ExecutorConnectorExecutionStatus
@@ -247,7 +250,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           occurredAt: completedAt,
           stepId: step.id,
           attempt,
-          outcome: { status: "succeeded" }
+          outcome: { status: "succeeded" },
+          approval: approvalAuditContextFromStepResult(stepResult)
         });
         break;
       } catch (error) {
@@ -285,7 +289,8 @@ export const runWorkflow = async (input: RunWorkflowInput): Promise<WorkflowRunS
           outcome: {
             status: auditOutcomeStatusFromRecovery(recovery),
             reason: errorReason(error)
-          }
+          },
+          approval: approvalAuditContextFromStepResult(stepResult)
         });
 
         if (
@@ -376,6 +381,53 @@ const normalizeStepHandlerResult = (
 
 const errorStepResult = (error: unknown): WorkflowStepAttemptResultMetadata | undefined =>
   error instanceof WorkflowStepOutcomeError ? error.result : undefined;
+
+const approvalAuditContextFromStepResult = (
+  stepResult: WorkflowStepAttemptResultMetadata | undefined
+): NeutralAuditApprovalContext | undefined => {
+  if (!isRecord(stepResult) || !isRecord(stepResult.executor)) {
+    return undefined;
+  }
+
+  const executorResult = stepResult.executor.result;
+  if (!isRecord(executorResult) || !isRecord(executorResult.output)) {
+    return undefined;
+  }
+
+  const approval = executorResult.output.approvalCheckpoint;
+  if (!isRecord(approval)) {
+    return undefined;
+  }
+
+  if (
+    approval.schemaVersion !== "flow.approval-checkpoint.v1" ||
+    typeof approval.checkpointId !== "string" ||
+    typeof approval.state !== "string" ||
+    typeof approval.reason !== "string" ||
+    typeof approval.inputRef !== "string" ||
+    typeof approval.inputFingerprint !== "string"
+  ) {
+    return undefined;
+  }
+
+  if (
+    approval.state !== "approval-required" &&
+    approval.state !== "approved" &&
+    approval.state !== "rejected"
+  ) {
+    return undefined;
+  }
+
+  return {
+    checkpointId: approval.checkpointId,
+    state: approval.state as NeutralAuditApprovalContext["state"],
+    reason: approval.reason,
+    inputRef: approval.inputRef,
+    inputFingerprint: approval.inputFingerprint,
+    ...(typeof approval.decidedBy === "string" ? { decidedBy: approval.decidedBy } : {}),
+    ...(typeof approval.decidedAt === "string" ? { decidedAt: approval.decidedAt } : {})
+  };
+};
 
 const executorFailureReason = (executor: ExecutorConnectorStatusSnapshot): string => {
   const resultSummary = executor.result?.summary;
@@ -790,6 +842,7 @@ interface StepAuditInput {
       | "manual-repair-needed";
     reason?: string;
   };
+  approval?: NeutralAuditApprovalContext;
 }
 
 const writeStepAuditEvent = async (
@@ -804,7 +857,8 @@ const writeStepAuditEvent = async (
       attempt: input.attempt
     },
     ...(input.retry === undefined ? {} : { retry: input.retry }),
-    ...(input.outcome === undefined ? {} : { outcome: input.outcome })
+    ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
+    ...(input.approval === undefined ? {} : { approval: input.approval })
   });
 };
 

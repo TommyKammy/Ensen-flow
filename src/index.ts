@@ -35,6 +35,14 @@ export {
 } from "./controlled-pilot-input-boundary.js";
 
 export {
+  controlledPilotInputPackageSchemaVersion,
+  createControlledPilotInputFingerprint,
+  runSelectedControlledPilot,
+  selectedControlledPilotId,
+  selectedControlledPilotWorkflowDefinition
+} from "./controlled-pilot-package.js";
+
+export {
   assertCustomerWorkflowAllowlisted
 } from "./customer-workflow-allowlist.js";
 
@@ -129,6 +137,14 @@ export type {
   CustomerWorkflowApprovalBoundaryArtifact,
   CustomerWorkflowApprovalState
 } from "./customer-workflow-approval-boundary.js";
+
+export type {
+  ControlledPilotApprovalCheckpoint,
+  ControlledPilotApprovalState,
+  ControlledPilotInputPackage,
+  ControlledPilotInputPackageMode,
+  RunSelectedControlledPilotInput
+} from "./controlled-pilot-package.js";
 
 export type {
   CreateFakeHttpNotificationTransportInput,

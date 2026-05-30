@@ -28,8 +28,16 @@ describe("controlled pilot rollback and revocation runbook", () => {
       "deleted local artifacts",
       "failure classification",
       "npm run build",
-      "node dist/cli.js run fixtures/workflow-definitions/simple-manual.valid.json <state-jsonl-path> '{\"requestId\":\"pilot-rollback-dry-run\"}'",
-      "node dist/cli.js export-audit-evidence <state-jsonl-path> [audit-jsonl-path] --output <export-json-path>",
+      "node dist/cli.js run-controlled-pilot fixtures/controlled-pilot/webhook-review-notification.dry-run.json <state-root> [audit-jsonl-path]",
+      "selected pilot state JSONL",
+      "`<state-root>/<run-id>.jsonl`",
+      "node dist/cli.js export-audit-evidence <state-root>/<run-id>.jsonl [audit-jsonl-path] --output <export-json-path>",
+      "webhook intake",
+      "human approval",
+      "fake HTTP",
+      "JSONL state",
+      "audit events",
+      "public-safe export metadata",
       "CODEX_SUPERVISOR_CONFIG=<supervisor-config-path>",
       "node dist/index.js issue-lint <this-issue-number>",
       "customer pilot approval remains out of scope",
@@ -41,6 +49,9 @@ describe("controlled pilot rollback and revocation runbook", () => {
       expect(runbook).toContain(requiredText);
     }
 
+    expect(runbook).not.toContain(
+      "node dist/cli.js run fixtures/workflow-definitions/simple-manual.valid.json"
+    );
     expect(runbook).not.toMatch(posixHomeRootPattern);
     expect(runbook).not.toMatch(linuxHomeRootPattern);
     expect(runbook).not.toMatch(windowsHomeRootPattern);

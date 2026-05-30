@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 const runbookPath = "docs/controlled-pilot-rollback-recovery-runbook.md";
+const pilotCatalogPath = "docs/controlled-pilot-candidate-catalog.md";
 const customerWorkflowRunbookPath =
   "docs/customer-workflow-rollback-evidence-retention-runbook.md";
 const flowClosurePath = "docs/x-gate3-track-a-flow-closure.md";
@@ -25,6 +26,16 @@ describe("documentation navigation", () => {
 
     expect(readme).toContain("docs/controlled-pilot-rollback-recovery-runbook.md");
     expect(docsIndex).toContain("controlled-pilot-rollback-recovery-runbook.md");
+  });
+
+  it("links the controlled pilot candidate catalog from public docs", async () => {
+    const [readme, docsIndex] = await Promise.all([
+      readFile(readmePath, "utf8"),
+      readFile(docsIndexPath, "utf8")
+    ]);
+
+    expect(readme).toContain("docs/controlled-pilot-candidate-catalog.md");
+    expect(docsIndex).toContain("controlled-pilot-candidate-catalog.md");
   });
 
   it("links the customer workflow rollback and evidence retention runbook from public docs", async () => {
@@ -230,5 +241,49 @@ describe("documentation navigation", () => {
     expect(runbook).not.toMatch(posixHomeRootPattern);
     expect(runbook).not.toMatch(linuxHomeRootPattern);
     expect(runbook).not.toMatch(windowsHomeRootPattern);
+  });
+
+  it("documents the selected controlled pilot candidate and Phase 6 exclusions", async () => {
+    const catalog = await readFile(pilotCatalogPath, "utf8");
+
+    for (const requiredText of [
+      "Controlled Pilot Candidate Catalog",
+      "FLOW-060",
+      "manual approval plus notification",
+      "scheduled repository hygiene report",
+      "webhook intake to human review to HTTP notification",
+      "Ensen-loop dry-run dispatch",
+      "The first controlled pilot is **webhook intake to human review to HTTP",
+      "synthetic or sanitized input",
+      "owner-controlled",
+      "dry-run first",
+      "human-approval-gated",
+      "trigger: a bounded local webhook fixture enters through `consumeWebhookInput`",
+      "approval: a human review step must record an explicit approval",
+      "connector: `flow.http-notification.v1` uses a fake or dry-run transport only",
+      "audit: JSONL run state, neutral audit events",
+      "recovery: webhook replay, retryable fake notification failure",
+      "Missing provenance, scope, authorization, connector boundary, or approval",
+      "customer workflows",
+      "ERPNext live connector behavior",
+      "regulated data",
+      "write-back",
+      "electronic signature",
+      "batch release",
+      "final disposition",
+      "production readiness",
+      "compliance claims",
+      "Track B reached means",
+      "does not mean live ERPNext",
+      "regulated execution",
+      "production operation",
+      "compliance approval"
+    ]) {
+      expect(catalog).toContain(requiredText);
+    }
+
+    expect(catalog).not.toMatch(posixHomeRootPattern);
+    expect(catalog).not.toMatch(linuxHomeRootPattern);
+    expect(catalog).not.toMatch(windowsHomeRootPattern);
   });
 });

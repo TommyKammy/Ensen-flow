@@ -57,6 +57,10 @@ authority, and no premature compliance claims.
   JSONL state recovery, approval/retry/idempotency recovery, notification
   misfire and webhook replay handling, and cleanup boundaries that preserve
   audit/evidence history.
+- `docs/controlled-pilot-candidate-catalog.md`: Phase 6 controlled pilot
+  candidate comparison and first-pilot selection, keeping the pilot
+  owner-controlled, dry-run first, human-approval-gated, and distinct from live
+  ERPNext, regulated execution, production readiness, or compliance approval.
 - `docs/customer-workflow-rollback-evidence-retention-runbook.md`: Track B
   customer workflow rollback, revocation, supersession, evidence retention,
   audit export, notification recovery, draft artifact recovery, workflow state

@@ -191,6 +191,11 @@ type NormalizedEvidenceRef = Omit<
   referenceKind: "publicSafeArtifactReference" | "localConfidentialReference";
 };
 
+interface AuditEvidenceExportRunScope {
+  runId: string;
+  workflowId: string;
+}
+
 export interface AuditEvidenceExportLocalConfidentialReferences {
   statePath: AuditEvidenceExportLocalReference;
   auditPath?: AuditEvidenceExportLocalReference;
@@ -434,6 +439,10 @@ const createRecoveryReplaySummary = (
   auditEvents: NeutralAuditEvent[]
 ): AuditEvidenceExportRecoveryReplay => {
   const recoveryClassification = classifyRecoveryReplay(state);
+  const runScope: AuditEvidenceExportRunScope = {
+    runId: state.run.runId,
+    workflowId: state.run.workflowId
+  };
 
   return {
     source: "workflow-run-state-and-neutral-audit",
@@ -450,12 +459,15 @@ const createRecoveryReplaySummary = (
       keyExported: false
     },
     stepHistory: Object.entries(state.stepAttempts).flatMap(([stepId, attempts]) =>
-      attempts.map((attempt) => summarizeRecoveryReplayStep(stepId, attempt, auditEvents))
+      attempts.map((attempt) =>
+        summarizeRecoveryReplayStep(runScope, stepId, attempt, auditEvents)
+      )
     )
   };
 };
 
 const summarizeRecoveryReplayStep = (
+  runScope: AuditEvidenceExportRunScope,
   stepId: string,
   attempt: WorkflowStepAttemptEventSummary,
   auditEvents: NeutralAuditEvent[]
@@ -468,7 +480,13 @@ const summarizeRecoveryReplayStep = (
     attempt: attempt.attempt,
     status: attempt.status,
     auditEventIds: auditEvents
-      .filter((event) => event.step?.id === stepId && event.step.attempt === attempt.attempt)
+      .filter(
+        (event) =>
+          event.run.id === runScope.runId &&
+          event.workflow.id === runScope.workflowId &&
+          event.step?.id === stepId &&
+          event.step.attempt === attempt.attempt
+      )
       .map((event) => event.id),
     ...(attempt.retry === undefined
       ? {}

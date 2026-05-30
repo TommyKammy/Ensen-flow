@@ -323,6 +323,46 @@ describe("selected controlled pilot dry-run package", () => {
     expect(transport.deliveries).toHaveLength(0);
   });
 
+  it("rejects resumed approval when the inputRef changed", async () => {
+    const pendingPackage = createPilotPackage();
+    delete pendingPackage.approval;
+    const approvedPackage = createPilotPackage();
+    approvedPackage.inputRef = "fixtures/controlled-pilot/webhook-review-notification.alt.json";
+    approvedPackage.approval!.inputRef = approvedPackage.inputRef;
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+
+    const pending = await runSelectedControlledPilot({
+      inputPackage: pendingPackage,
+      stateRoot,
+      auditPath,
+      notificationTransport: transport
+    });
+    const expectedRunId = createExpectedWebhookRunId(
+      "controlled-pilot-webhook-review-notification",
+      pendingPackage.webhook.requestId
+    );
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+    const stateBeforeReplay = await readFile(statePath, "utf8");
+    const auditBeforeReplay = await readFile(auditPath, "utf8");
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage: approvedPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: transport
+      })
+    ).rejects.toThrow("controlled pilot inputRef must match the pending approval run");
+
+    expect(pending.run.status).toBe("running");
+    await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
+    await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
   it("rejects resumed approval when the notification package changed", async () => {
     const pendingPackage = createPilotPackage();
     delete pendingPackage.approval;
@@ -365,6 +405,36 @@ describe("selected controlled pilot dry-run package", () => {
     expect(pending.run.status).toBe("running");
     await expect(readFile(statePath, "utf8")).resolves.toBe(stateBeforeReplay);
     await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
+    expect(transport.deliveries).toHaveLength(0);
+  });
+
+  it("rejects invalid notification targets before recording pending approval", async () => {
+    const inputPackage = createPilotPackage();
+    delete inputPackage.approval;
+    inputPackage.notification.endpointAlias = "https://example.invalid/operator";
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const transport = createFakeHttpNotificationTransport();
+    const expectedRunId = createExpectedWebhookRunId(
+      "controlled-pilot-webhook-review-notification",
+      inputPackage.webhook.requestId
+    );
+    const statePath = join(stateRoot, `${expectedRunId}.jsonl`);
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: transport
+      })
+    ).rejects.toThrow(
+      "HTTP notification endpointAlias must be a stable local alias, not a URL or secret"
+    );
+
+    await expect(readFile(statePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(transport.deliveries).toHaveLength(0);
   });
 

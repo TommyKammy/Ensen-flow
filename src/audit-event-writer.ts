@@ -126,6 +126,7 @@ export const createLocalAuditEventWriter = (
   input: CreateLocalAuditEventWriterInput
 ): NeutralAuditEventWriter => {
   let sequence: number | undefined;
+  let writeQueue: Promise<void> = Promise.resolve();
   const auditPath = input.auditPath;
   const actor = Object.freeze(
     input.actor === undefined
@@ -142,34 +143,40 @@ export const createLocalAuditEventWriter = (
 
   return {
     async write(eventInput) {
-      sequence ??= await readExistingAuditSequence(auditPath, run.id);
-      sequence += 1;
-      const step =
-        eventInput.step === undefined ? undefined : Object.freeze({ ...eventInput.step });
-      const retry =
-        eventInput.retry === undefined ? undefined : Object.freeze({ ...eventInput.retry });
-      const outcome =
-        eventInput.outcome === undefined ? undefined : Object.freeze({ ...eventInput.outcome });
-      const approval =
-        eventInput.approval === undefined
-          ? undefined
-          : Object.freeze({ ...eventInput.approval });
-      const event: NeutralAuditEvent = {
-        id: createAuditEventId(run.id, sequence),
-        type: eventInput.type,
-        occurredAt: eventInput.occurredAt,
-        actor,
-        source,
-        workflow,
-        run,
-        ...(step === undefined ? {} : { step }),
-        ...(retry === undefined ? {} : { retry }),
-        ...(outcome === undefined ? {} : { outcome }),
-        ...(approval === undefined ? {} : { approval })
+      const writeEvent = async () => {
+        sequence ??= await readExistingAuditSequence(auditPath, run.id);
+        sequence += 1;
+        const step =
+          eventInput.step === undefined ? undefined : Object.freeze({ ...eventInput.step });
+        const retry =
+          eventInput.retry === undefined ? undefined : Object.freeze({ ...eventInput.retry });
+        const outcome =
+          eventInput.outcome === undefined ? undefined : Object.freeze({ ...eventInput.outcome });
+        const approval =
+          eventInput.approval === undefined
+            ? undefined
+            : Object.freeze({ ...eventInput.approval });
+        const event: NeutralAuditEvent = {
+          id: createAuditEventId(run.id, sequence),
+          type: eventInput.type,
+          occurredAt: eventInput.occurredAt,
+          actor,
+          source,
+          workflow,
+          run,
+          ...(step === undefined ? {} : { step }),
+          ...(retry === undefined ? {} : { retry }),
+          ...(outcome === undefined ? {} : { outcome }),
+          ...(approval === undefined ? {} : { approval })
+        };
+
+        validateNeutralAuditEvent(event);
+        await appendAuditEvent(auditPath, event);
       };
 
-      validateNeutralAuditEvent(event);
-      await appendAuditEvent(auditPath, event);
+      const queuedWrite = writeQueue.then(writeEvent, writeEvent);
+      writeQueue = queuedWrite.catch(() => undefined);
+      await queuedWrite;
     }
   };
 };

@@ -434,11 +434,12 @@ const isWorkflowStepNonRetryableError = (error: unknown): boolean =>
 const approvalAuditContextFromStepResult = (
   stepResult: WorkflowStepAttemptResultMetadata | undefined
 ): NeutralAuditApprovalContext | undefined => {
-  if (!isRecord(stepResult) || !isRecord(stepResult.executor)) {
+  if (!isRecord(stepResult) || !isExecutorStatusSnapshot(stepResult.executor)) {
     return undefined;
   }
 
-  const executorResult = stepResult.executor.result;
+  const executor = stepResult.executor;
+  const executorResult = executor.result;
   if (!isRecord(executorResult) || !isRecord(executorResult.output)) {
     return undefined;
   }
@@ -498,6 +499,13 @@ const approvalAuditContextFromStepResult = (
     ...(typeof approval.decidedAt === "string" ? { decidedAt: approval.decidedAt } : {})
   };
 
+  const expectedApprovalState = approvalStateForExecutorStatus(executor.status);
+  if (expectedApprovalState === undefined || auditContext.state !== expectedApprovalState) {
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint state must match executor.status"
+    );
+  }
+
   try {
     validateNeutralAuditApprovalContext(auditContext);
   } catch (error) {
@@ -508,6 +516,24 @@ const approvalAuditContextFromStepResult = (
   }
 
   return auditContext;
+};
+
+const approvalStateForExecutorStatus = (
+  status: string
+): NeutralAuditApprovalContext["state"] | undefined => {
+  if (status === "succeeded") {
+    return "approved";
+  }
+
+  if (status === "approval-required") {
+    return "approval-required";
+  }
+
+  if (status === "blocked") {
+    return "rejected";
+  }
+
+  return undefined;
 };
 
 const executorFailureReason = (executor: ExecutorConnectorStatusSnapshot): string => {

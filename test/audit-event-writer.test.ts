@@ -26,6 +26,12 @@ const readAuditEvent = async (auditPath: string): Promise<Record<string, unknown
   return JSON.parse(line) as Record<string, unknown>;
 };
 
+const readAuditEvents = async (auditPath: string): Promise<Array<Record<string, unknown>>> =>
+  (await readFile(auditPath, "utf8"))
+    .trimEnd()
+    .split("\n")
+    .map((line): Record<string, unknown> => JSON.parse(line) as Record<string, unknown>);
+
 afterEach(async () => {
   await Promise.all(
     tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
@@ -33,6 +39,29 @@ afterEach(async () => {
 });
 
 describe("neutral audit event writer", () => {
+  it("keeps audit event sequence IDs unique for concurrent writes on one writer", async () => {
+    const auditPath = await createTempAuditPath();
+    const writer = createLocalAuditEventWriter({
+      auditPath,
+      workflow: { id: "local-manual-demo", version: "flow.workflow.v1" },
+      run: { id: "local-manual-demo-concurrent" }
+    });
+
+    const createEvent = (index: number): CreateNeutralAuditEventInput => ({
+      type: "step.started",
+      occurredAt: `2026-04-29T00:00:0${index}.000Z`,
+      step: { id: "collect-input", attempt: index }
+    });
+
+    await Promise.all([writer.write(createEvent(1)), writer.write(createEvent(2))]);
+
+    const events = await readAuditEvents(auditPath);
+    expect(events.map((event) => event.id)).toEqual([
+      "audit.local-manual-demo-concurrent.000001",
+      "audit.local-manual-demo-concurrent.000002"
+    ]);
+  });
+
   it("exports public-safe audit and evidence metadata without raw local paths or trigger context", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));

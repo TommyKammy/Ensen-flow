@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 import {
   createFakeHttpNotificationTransport,
-  createHttpNotificationConnector
+  createHttpNotificationConnector,
+  validateHttpNotificationTarget
 } from "./http-notification-connector.js";
 import { WorkflowStepNonRetryableError } from "./workflow-runner.js";
 import {
@@ -126,6 +127,12 @@ export const runSelectedControlledPilot = async (
   const notificationFingerprint = createControlledPilotNotificationFingerprint(
     normalizedPackage.notification
   );
+  const notificationValidationError = validateHttpNotificationTarget(
+    normalizedPackage.notification
+  );
+  if (notificationValidationError !== undefined) {
+    throw new Error(notificationValidationError);
+  }
   const approval = normalizeApprovalCheckpoint({
     approval: normalizedPackage.approval,
     inputRef: normalizedPackage.inputRef,
@@ -146,11 +153,15 @@ export const runSelectedControlledPilot = async (
     input: normalizedPackage.webhook,
     additionalTriggerContext: {
       controlledPilot: {
+        inputRef: normalizedPackage.inputRef,
         notificationFingerprint
       }
     },
     existingRunStateGuard: (existingState) =>
-      assertControlledPilotNotificationMatchesState(existingState, notificationFingerprint),
+      assertControlledPilotPackageMatchesState(existingState, {
+        inputRef: normalizedPackage.inputRef,
+        notificationFingerprint
+      }),
     recoverApprovalRequiredStepIds: approval === undefined ? [] : ["human-approval"],
     now: input.now,
     stepHandler: async ({ step, runState, attempt }) => {
@@ -340,18 +351,29 @@ const createRecordedApprovalCheckpoint = (
   inputFingerprint: approval.inputFingerprint
 });
 
-const assertControlledPilotNotificationMatchesState = (
+const assertControlledPilotPackageMatchesState = (
   existingState: WorkflowRunState,
-  notificationFingerprint: string
+  input: {
+    inputRef: string;
+    notificationFingerprint: string;
+  }
 ): void => {
   const controlledPilot = existingState.run.trigger.context?.controlledPilot;
-  if (!isRecord(controlledPilot) || typeof controlledPilot.notificationFingerprint !== "string") {
+  if (
+    !isRecord(controlledPilot) ||
+    typeof controlledPilot.inputRef !== "string" ||
+    typeof controlledPilot.notificationFingerprint !== "string"
+  ) {
     throw new Error(
-      "controlled pilot run state must include the notification fingerprint before approval recovery"
+      "controlled pilot run state must include the inputRef and notification fingerprint before approval recovery"
     );
   }
 
-  if (controlledPilot.notificationFingerprint !== notificationFingerprint) {
+  if (controlledPilot.inputRef !== input.inputRef) {
+    throw new Error("controlled pilot inputRef must match the pending approval run");
+  }
+
+  if (controlledPilot.notificationFingerprint !== input.notificationFingerprint) {
     throw new Error("controlled pilot notification package must match the pending approval run");
   }
 };

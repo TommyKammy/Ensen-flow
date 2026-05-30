@@ -1386,6 +1386,69 @@ describe("sequential workflow runner", () => {
     );
   });
 
+  it("rejects approval checkpoints whose state conflicts with executor outcome", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-mismatched-approval-state"
+      },
+      now: createClock([
+        "2026-04-29T00:11:00.000Z",
+        "2026-04-29T00:11:01.000Z",
+        "2026-04-29T00:11:02.000Z",
+        "2026-04-29T00:11:03.000Z",
+        "2026-04-29T00:11:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_mismatched_approval_state",
+          status: "approval-required",
+          observedAt: "2026-04-29T00:11:02.000Z",
+          result: {
+            status: "blocked",
+            summary: "Approval state should not override executor recovery.",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-004",
+                state: "approved",
+                decidedBy: "pilot-owner",
+                decidedAt: "2026-04-29T00:11:02.000Z",
+                reason: "Approval state conflicts with executor outcome.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "step handler approvalCheckpoint state must match executor.status"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
   it.each([
     {
       executorStatus: "succeeded",

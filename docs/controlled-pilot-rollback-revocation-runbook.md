@@ -27,17 +27,29 @@ Build the local CLI before any dry-run command:
 npm run build
 ```
 
-Create or reproduce a fake local run with an explicit request ID:
+Create or reproduce the selected Phase 6 controlled pilot with the fake local
+notification transport and dry-run input package:
 
 ```sh
-node dist/cli.js run fixtures/workflow-definitions/simple-manual.valid.json <state-jsonl-path> '{"requestId":"pilot-rollback-dry-run"}'
+node dist/cli.js run-controlled-pilot fixtures/controlled-pilot/webhook-review-notification.dry-run.json <state-root> [audit-jsonl-path]
 ```
 
-Export public-safe audit and evidence metadata from retained state:
+The command prints JSON that includes `runId`. The selected pilot state JSONL is
+written under `<state-root>/<run-id>.jsonl`, where `<run-id>` is the printed
+`runId`. Use that generated selected-pilot state file for export; the generic
+manual workflow state is not sufficient to verify the selected pilot approval,
+notification, and evidence path.
+
+Export public-safe audit and evidence metadata from the generated selected
+pilot state:
 
 ```sh
-node dist/cli.js export-audit-evidence <state-jsonl-path> [audit-jsonl-path] --output <export-json-path>
+node dist/cli.js export-audit-evidence <state-root>/<run-id>.jsonl [audit-jsonl-path] --output <export-json-path>
 ```
+
+This selected pilot command covers webhook intake, human approval, fake HTTP
+notification, JSONL state, audit events, and public-safe export metadata. Keep
+all pilot inputs fake, local, read-only, or dry-run only.
 
 From the companion supervisor checkout, validate issue readiness with an
 operator-provided config path:
@@ -52,7 +64,7 @@ The commands above may create or read these artifacts:
 
 | Artifact | Expected owner | Retention rule |
 | --- | --- | --- |
-| `<state-jsonl-path>` | Flow local run state | Retain every appended line, including failed, revoked, superseded, retried, blocked, and canceled facts. |
+| `<state-root>/<run-id>.jsonl` | Flow selected pilot local run state | Retain every appended line, including failed, revoked, superseded, retried, blocked, and canceled facts. |
 | `[audit-jsonl-path]` | Flow neutral audit events | Retain when present; missing audit input must not cause state deletion. |
 | `<export-json-path>` | Public-safe audit/evidence export | Regenerate from retained state; do not hand-edit it into agreement with an operator summary. |
 | `<temporary-input-json-file>` | Scratch input for the current dry run | May be deleted after the run when it is not the only evidence of a decision. |

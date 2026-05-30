@@ -8,6 +8,8 @@ const docsIndexPath = "docs/README.md";
 const posixHomeRootPattern = new RegExp(["", "Users", "[A-Za-z0-9._-]+"].join("\\/"));
 const linuxHomeRootPattern = new RegExp(["", "home", "[A-Za-z0-9._-]+"].join("\\/"));
 const windowsHomeRootPattern = new RegExp(["[A-Za-z]:", "Users", ""].join("\\\\"));
+const sameLineSupervisorConfigExpansionPattern =
+  /CODEX_SUPERVISOR_CONFIG=[^\n]*"\$CODEX_SUPERVISOR_CONFIG"/;
 
 describe("controlled pilot rollback and revocation runbook", () => {
   it("documents commands, artifacts, classifications, retained evidence, and X-Gate 5 blockers", async () => {
@@ -55,6 +57,7 @@ describe("controlled pilot rollback and revocation runbook", () => {
     expect(runbook).not.toMatch(posixHomeRootPattern);
     expect(runbook).not.toMatch(linuxHomeRootPattern);
     expect(runbook).not.toMatch(windowsHomeRootPattern);
+    expect(runbook).not.toMatch(sameLineSupervisorConfigExpansionPattern);
   });
 
   it("links the runbook from public documentation navigation", async () => {

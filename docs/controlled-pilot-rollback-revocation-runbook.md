@@ -55,7 +55,8 @@ From the companion supervisor checkout, validate issue readiness with an
 operator-provided config path:
 
 ```sh
-CODEX_SUPERVISOR_CONFIG=<supervisor-config-path> node dist/index.js issue-lint <this-issue-number> --config "$CODEX_SUPERVISOR_CONFIG"
+export CODEX_SUPERVISOR_CONFIG=<supervisor-config-path>
+node dist/index.js issue-lint <this-issue-number> --config "$CODEX_SUPERVISOR_CONFIG"
 ```
 
 ## Expected Artifacts

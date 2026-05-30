@@ -63,6 +63,10 @@ authority, and no premature compliance claims.
   candidate comparison and first-pilot selection, keeping the pilot
   owner-controlled, dry-run first, human-approval-gated, and distinct from live
   ERPNext, regulated execution, production readiness, or compliance approval.
+- `docs/controlled-pilot-rollback-revocation-runbook.md`: controlled pilot
+  X-Gate 5 rollback, revocation, supersession, retry, retained evidence,
+  deleted local artifact, failure classification, and blocker guidance for
+  fake, local, read-only, or draft-only pilot rehearsal inputs.
 - `docs/customer-workflow-rollback-evidence-retention-runbook.md`: Track B
   customer workflow rollback, revocation, supersession, evidence retention,
   audit export, notification recovery, draft artifact recovery, workflow state

@@ -28,6 +28,16 @@ export interface AuditEvidenceExportBoundary {
     name: "ensen-protocol";
     version: "0.4.0";
   };
+  protocolEvidenceProfileSnapshot: {
+    name: "ensen-protocol";
+    version: "0.3.0";
+    profile: "operational-evidence-profile.v1";
+  };
+  trackBBoundarySnapshot: {
+    name: "ensen-protocol";
+    version: "0.4.0";
+    boundary: "Track B customer-regulated data classification";
+  };
   protocolEvidenceProfile: "operational-evidence-profile.v1";
   notes: string[];
 }
@@ -55,6 +65,7 @@ export interface AuditEvidenceExportPublicSafe {
   steps: AuditEvidenceExportStepSummary[];
   auditEvents: AuditEvidenceExportAuditEventSummary[];
   evidenceRefs: AuditEvidenceExportEvidenceRef[];
+  recoveryReplay: AuditEvidenceExportRecoveryReplay;
   diagnostics: string[];
 }
 
@@ -116,6 +127,54 @@ export interface AuditEvidenceExportEvidenceRef {
   checksumPresence: "present" | "absent";
 }
 
+export interface AuditEvidenceExportRecoveryReplay {
+  source: "workflow-run-state-and-neutral-audit";
+  run: {
+    status: string;
+    terminalState?: string;
+    recoveryClassification:
+      | "recoverable"
+      | "terminal"
+      | "approval-required"
+      | "blocked"
+      | "manual-repair-needed";
+    replayAction:
+      | "resume-from-projected-state"
+      | "do-not-replay"
+      | "operator-review-required";
+  };
+  trigger: {
+    idempotencyKeyBound: boolean;
+    keyExported: false;
+  };
+  stepHistory: AuditEvidenceExportRecoveryReplayStep[];
+}
+
+export interface AuditEvidenceExportRecoveryReplayStep {
+  stepId: string;
+  attempt: number;
+  status: string;
+  auditEventIds: string[];
+  retry?: {
+    retryable: boolean;
+    nextAttemptAt?: string;
+    reasonExported: false;
+  };
+  recovery?: {
+    state: string;
+    decision: string;
+    reasonExported: false;
+  };
+  approval?: {
+    state: AuditEvidenceExportApprovalState;
+    inputRef?: string;
+    decidedAt?: string;
+    reasonExported: false;
+    decidedByExported: false;
+  };
+  evidenceRefIds: string[];
+}
+
 type EvidenceDataClassification =
   | "public"
   | "internal"
@@ -123,6 +182,7 @@ type EvidenceDataClassification =
   | "customer-confidential"
   | "regulated"
   | "restricted";
+export type AuditEvidenceExportApprovalState = "approval-required" | "approved" | "rejected";
 
 type NormalizedEvidenceRef = Omit<
   AuditEvidenceExportEvidenceRef,
@@ -131,6 +191,12 @@ type NormalizedEvidenceRef = Omit<
   dataClassification: EvidenceDataClassification | undefined;
   referenceKind: "publicSafeArtifactReference" | "localConfidentialReference";
 };
+
+interface AuditEvidenceExportRunScope {
+  runId: string;
+  workflowId: string;
+  workflowVersion: string;
+}
 
 export interface AuditEvidenceExportLocalConfidentialReferences {
   statePath: AuditEvidenceExportLocalReference;
@@ -146,6 +212,13 @@ export interface AuditEvidenceExportLocalReference {
 const EXPORT_SCHEMA_VERSION = "flow.audit-evidence-export.v1";
 const EVIDENCE_REF_SCHEMA_VERSION = "eip.evidence-bundle-ref.v1";
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const EXPORTABLE_APPROVAL_STATES = new Set<AuditEvidenceExportApprovalState>([
+  "approval-required",
+  "approved",
+  "rejected"
+]);
 
 export const createAuditEvidenceExport = async (
   input: CreateAuditEvidenceExportInput
@@ -158,6 +231,7 @@ export const createAuditEvidenceExport = async (
       : await readNeutralAuditEvents(input.auditPath).catch((error: unknown) => {
           throw new Error(`audit event export failed: ${safeErrorMessage(error)}`);
         });
+  const runAuditEvents = filterAuditEventsForRun(state, auditEvents);
   const exportArtifact: AuditEvidenceExport = {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     boundary: {
@@ -166,11 +240,21 @@ export const createAuditEvidenceExport = async (
         name: "ensen-protocol",
         version: "0.4.0"
       },
+      protocolEvidenceProfileSnapshot: {
+        name: "ensen-protocol",
+        version: "0.3.0",
+        profile: "operational-evidence-profile.v1"
+      },
+      trackBBoundarySnapshot: {
+        name: "ensen-protocol",
+        version: "0.4.0",
+        boundary: "Track B customer-regulated data classification"
+      },
       protocolEvidenceProfile: "operational-evidence-profile.v1",
       notes: [
         "This is a deterministic local metadata export skeleton.",
         "It is not a production evidence archive, compliance bundle, or customer data export.",
-        "It uses the copied Protocol v0.4.0 operational evidence and Track B classification vocabulary without claiming protocol conformance, regulated workflow execution, or production evidence readiness."
+        "It uses copied Protocol v0.3.0 operational evidence profile and Protocol v0.4.0 Track B boundary snapshots without runtime protocol imports, protocol conformance claims, regulated workflow execution, or production evidence readiness."
       ]
     },
     publicSafe: {
@@ -217,8 +301,9 @@ export const createAuditEvidenceExport = async (
             })
       },
       steps: summarizeStepAttempts(state),
-      auditEvents: auditEvents.map(summarizeAuditEvent),
+      auditEvents: runAuditEvents.map(summarizeAuditEvent),
       evidenceRefs: collectPublicEvidenceRefs(state, diagnostics),
+      recoveryReplay: createRecoveryReplaySummary(state, runAuditEvents),
       diagnostics
     },
     localConfidentialReferences: {
@@ -252,6 +337,18 @@ export const createAuditEvidenceExport = async (
 
   return exportArtifact;
 };
+
+const filterAuditEventsForRun = (
+  state: WorkflowRunState,
+  auditEvents: NeutralAuditEvent[]
+): NeutralAuditEvent[] =>
+  auditEvents.filter((event) =>
+    auditEventMatchesRunScope(event, {
+      runId: state.run.runId,
+      workflowId: state.run.workflowId,
+      workflowVersion: state.run.workflowVersion
+    })
+  );
 
 const summarizeStepAttempts = (
   state: WorkflowRunState
@@ -307,6 +404,7 @@ const validateNeutralAuditEventForExport = (
     typeof value.occurredAt !== "string" ||
     !isRecord(value.workflow) ||
     typeof value.workflow.id !== "string" ||
+    typeof value.workflow.version !== "string" ||
     !isRecord(value.run) ||
     typeof value.run.id !== "string"
   ) {
@@ -348,6 +446,257 @@ const summarizeAuditEvent = (
       }),
   ...(event.outcome === undefined ? {} : { outcomeStatus: event.outcome.status })
 });
+
+const createRecoveryReplaySummary = (
+  state: WorkflowRunState,
+  auditEvents: NeutralAuditEvent[]
+): AuditEvidenceExportRecoveryReplay => {
+  const recoveryClassification = classifyRecoveryReplay(state);
+  const runScope: AuditEvidenceExportRunScope = {
+    runId: state.run.runId,
+    workflowId: state.run.workflowId,
+    workflowVersion: state.run.workflowVersion
+  };
+
+  return {
+    source: "workflow-run-state-and-neutral-audit",
+    run: {
+      status: state.run.status,
+      ...(state.run.terminalState === undefined
+        ? {}
+        : { terminalState: state.run.terminalState }),
+      recoveryClassification,
+      replayAction: recoveryReplayAction(recoveryClassification)
+    },
+    trigger: {
+      idempotencyKeyBound: state.run.trigger.idempotencyKey !== undefined,
+      keyExported: false
+    },
+    stepHistory: Object.entries(state.stepAttempts).flatMap(([stepId, attempts]) =>
+      attempts.map((attempt) =>
+        summarizeRecoveryReplayStep(runScope, stepId, attempt, auditEvents)
+      )
+    )
+  };
+};
+
+const summarizeRecoveryReplayStep = (
+  runScope: AuditEvidenceExportRunScope,
+  stepId: string,
+  attempt: WorkflowStepAttemptEventSummary,
+  auditEvents: NeutralAuditEvent[]
+): AuditEvidenceExportRecoveryReplayStep => {
+  const approval = approvalSummaryFromAttempt(attempt);
+  const evidenceRefIds = evidenceRefIdsFromAttempt(attempt);
+
+  return {
+    stepId,
+    attempt: attempt.attempt,
+    status: attempt.status,
+    auditEventIds: auditEvents
+      .filter(
+        (event) =>
+          auditEventMatchesRunScope(event, runScope) &&
+          event.step?.id === stepId &&
+          event.step.attempt === attempt.attempt
+      )
+      .map((event) => event.id),
+    ...(attempt.retry === undefined
+      ? {}
+      : {
+          retry: {
+            retryable: attempt.retry.retryable,
+            ...(attempt.retry.nextAttemptAt === undefined
+              ? {}
+              : { nextAttemptAt: attempt.retry.nextAttemptAt }),
+            reasonExported: false
+          }
+        }),
+    ...(attempt.recovery === undefined
+      ? {}
+      : {
+          recovery: {
+            state: attempt.recovery.state,
+            decision: attempt.recovery.decision,
+            reasonExported: false
+          }
+        }),
+    ...(approval === undefined ? {} : { approval }),
+    evidenceRefIds
+  };
+};
+
+type WorkflowStepAttemptEventSummary = WorkflowRunState["stepAttempts"][string][number];
+
+const approvalSummaryFromAttempt = (
+  attempt: WorkflowStepAttemptEventSummary
+): AuditEvidenceExportRecoveryReplayStep["approval"] | undefined => {
+  const approval = findApprovalCheckpoint(attempt.result);
+  if (approval === undefined) {
+    return undefined;
+  }
+
+  return {
+    state: approval.state,
+    ...(approval.inputRef === undefined ? {} : { inputRef: approval.inputRef }),
+    ...(approval.decidedAt === undefined ? {} : { decidedAt: approval.decidedAt }),
+    reasonExported: false,
+    decidedByExported: false
+  };
+};
+
+const findApprovalCheckpoint = (
+  value: unknown
+):
+  | { state: AuditEvidenceExportApprovalState; inputRef?: string; decidedAt?: string }
+  | undefined => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findApprovalCheckpoint(item);
+      if (nested !== undefined) {
+        return nested;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (value.schemaVersion === "flow.approval-checkpoint.v1") {
+    const state = normalizeApprovalState(value.state);
+    if (state === undefined) {
+      return undefined;
+    }
+
+    return {
+      state,
+      ...approvalInputRefExport(value),
+      ...(typeof value.decidedAt === "string" && isStrictUtcMillisTimestamp(value.decidedAt)
+        ? { decidedAt: value.decidedAt }
+        : {})
+    };
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nested = findApprovalCheckpoint(nestedValue);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+
+  return undefined;
+};
+
+const approvalInputRefExport = (
+  value: Record<string, unknown>
+): { inputRef: string } | Record<string, never> => {
+  if (
+    typeof value.inputRef !== "string" ||
+    value.inputRefDataClassification !== "public" ||
+    !isPublicSafeRelativeRef(value.inputRef)
+  ) {
+    return {};
+  }
+
+  return { inputRef: value.inputRef };
+};
+
+const auditEventMatchesRunScope = (
+  event: NeutralAuditEvent,
+  runScope: AuditEvidenceExportRunScope
+): boolean =>
+  event.run.id === runScope.runId &&
+  event.workflow.id === runScope.workflowId &&
+  event.workflow.version === runScope.workflowVersion;
+
+const normalizeApprovalState = (
+  value: unknown
+): AuditEvidenceExportApprovalState | undefined => {
+  if (
+    typeof value === "string" &&
+    EXPORTABLE_APPROVAL_STATES.has(value as AuditEvidenceExportApprovalState)
+  ) {
+    return value as AuditEvidenceExportApprovalState;
+  }
+
+  return undefined;
+};
+
+const isStrictUtcMillisTimestamp = (value: string): boolean => {
+  if (!ISO_UTC_MILLIS_TIMESTAMP_PATTERN.test(value)) {
+    return false;
+  }
+
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+};
+
+const evidenceRefIdsFromAttempt = (attempt: WorkflowStepAttemptEventSummary): string[] => {
+  if (attempt.result === undefined) {
+    return [];
+  }
+
+  const refs: AuditEvidenceExportEvidenceRef[] = [];
+  collectEvidenceRefsFromValue(attempt.result, refs, []);
+  return refs.map((ref) => ref.id);
+};
+
+const classifyRecoveryReplay = (
+  state: WorkflowRunState
+): AuditEvidenceExportRecoveryReplay["run"]["recoveryClassification"] => {
+  if (state.run.terminalState === "failed" && hasLatestStepStatus(state, "blocked")) {
+    return "blocked";
+  }
+
+  if (state.run.terminalState !== undefined) {
+    return "terminal";
+  }
+
+  if (hasLatestStepStatus(state, "running")) {
+    return "manual-repair-needed";
+  }
+
+  if (hasLatestStepStatus(state, "approval-required")) {
+    return "approval-required";
+  }
+
+  if (hasLatestStepStatus(state, "blocked")) {
+    return "blocked";
+  }
+
+  if (hasLatestStepStatus(state, "manual-repair-needed")) {
+    return "manual-repair-needed";
+  }
+
+  if (hasLatestStepStatus(state, "failed")) {
+    return "manual-repair-needed";
+  }
+
+  return "recoverable";
+};
+
+const recoveryReplayAction = (
+  classification: AuditEvidenceExportRecoveryReplay["run"]["recoveryClassification"]
+): AuditEvidenceExportRecoveryReplay["run"]["replayAction"] => {
+  if (classification === "terminal") {
+    return "do-not-replay";
+  }
+
+  if (classification === "recoverable") {
+    return "resume-from-projected-state";
+  }
+
+  return "operator-review-required";
+};
+
+const hasLatestStepStatus = (
+  state: WorkflowRunState,
+  status: WorkflowStepAttemptEventSummary["status"]
+): boolean =>
+  Object.values(state.stepAttempts).some((attempts) => attempts.at(-1)?.status === status);
 
 const collectPublicEvidenceRefs = (
   state: WorkflowRunState,
@@ -524,6 +873,9 @@ const isSafeRelativePath = (value: string): boolean => {
     !trimmed.split(/[\\/]+/u).includes("..")
   );
 };
+
+const isPublicSafeRelativeRef = (value: string): boolean =>
+  isSafeRelativePath(value) && classifyUnsafeWorkflowArtifactString(value) === undefined;
 
 const createUnsafeEvidenceRefDiagnostic = (ref: NormalizedEvidenceRef): string => {
   if (ref.dataClassification === undefined) {

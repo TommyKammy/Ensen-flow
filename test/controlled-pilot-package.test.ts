@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
 import {
+  createAuditEvidenceExport,
   createControlledPilotInputFingerprint,
   createFakeHttpNotificationTransport,
   readWorkflowRunState,
@@ -733,6 +734,252 @@ describe("selected controlled pilot dry-run package", () => {
     await expect(readFile(auditPath, "utf8")).resolves.toBe(auditBeforeReplay);
     expect(await readWorkflowRunState(statePath)).toEqual(first);
     expect((transport as FakeHttpNotificationTransport).deliveries).toHaveLength(1);
+  });
+
+  it("exports public-safe pilot recovery replay evidence for retry and approval rejection history", async () => {
+    const approvedPackage = createPilotPackage();
+    const approvedRoot = await createTempRoot();
+    const approvedStateRoot = join(approvedRoot, "runs");
+    const approvedAuditPath = join(approvedRoot, "audit", "pilot.audit.jsonl");
+    const approvedTransport = createFakeHttpNotificationTransport({
+      outcomes: [
+        {
+          status: "failed",
+          summary: "local fake endpoint temporarily unavailable",
+          retryable: true
+        },
+        {
+          status: "succeeded",
+          summary: "local fake notification accepted after retry",
+          evidence: {
+            evidenceBundleRef: {
+              schemaVersion: "eip.evidence-bundle-ref.v1",
+              id: "evb_controlled_pilot_retry",
+              correlationId: "corr_controlled_pilot_retry",
+              type: "local_path",
+              uri: "artifacts/evidence/controlled-pilot/retry-bundle.json",
+              createdAt: "2026-05-30T00:00:09.000Z",
+              dataClassification: "public"
+            }
+          }
+        }
+      ]
+    });
+
+    const approved = await runSelectedControlledPilot({
+      inputPackage: approvedPackage,
+      stateRoot: approvedStateRoot,
+      auditPath: approvedAuditPath,
+      notificationTransport: approvedTransport,
+      now: createClock([
+        "2026-05-30T00:00:00.000Z",
+        "2026-05-30T00:00:01.000Z",
+        "2026-05-30T00:00:02.000Z",
+        "2026-05-30T00:00:03.000Z",
+        "2026-05-30T00:00:04.000Z",
+        "2026-05-30T00:00:05.000Z",
+        "2026-05-30T00:00:06.000Z",
+        "2026-05-30T00:00:07.000Z",
+        "2026-05-30T00:00:08.000Z",
+        "2026-05-30T00:00:09.000Z"
+      ])
+    });
+    const approvedStatePath = join(approvedStateRoot, `${approved.run.runId}.jsonl`);
+    const aggregateAuditEvents = [
+      {
+        id: "audit.other-controlled-pilot-run.000001",
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:10.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: approved.run.workflowId,
+          version: approved.run.workflowVersion
+        },
+        run: { id: "other-controlled-pilot-run" },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      },
+      {
+        id: `audit.${approved.run.runId}.999998`,
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:11.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: approved.run.workflowId,
+          version: "flow.workflow.other-version"
+        },
+        run: { id: approved.run.runId },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      },
+      {
+        id: `audit.${approved.run.runId}.999999`,
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:12.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: "other-controlled-pilot-workflow",
+          version: approved.run.workflowVersion
+        },
+        run: { id: approved.run.runId },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      }
+    ];
+    await writeFile(
+      approvedAuditPath,
+      `${await readFile(approvedAuditPath, "utf8")}${aggregateAuditEvents
+        .map((event) => JSON.stringify(event))
+        .join("\n")}\n`,
+      "utf8"
+    );
+
+    const approvedExport = await createAuditEvidenceExport({
+      statePath: approvedStatePath,
+      auditPath: approvedAuditPath
+    });
+    expect(approvedExport.boundary).toMatchObject({
+      protocolEvidenceProfileSnapshot: {
+        name: "ensen-protocol",
+        version: "0.3.0",
+        profile: "operational-evidence-profile.v1"
+      },
+      trackBBoundarySnapshot: {
+        name: "ensen-protocol",
+        version: "0.4.0",
+        boundary: "Track B customer-regulated data classification"
+      },
+      productionEvidenceReady: false
+    });
+    expect(approvedExport.publicSafe.recoveryReplay).toMatchObject({
+      source: "workflow-run-state-and-neutral-audit",
+      run: {
+        status: "succeeded",
+        terminalState: "succeeded",
+        replayAction: "do-not-replay"
+      },
+      trigger: {
+        idempotencyKeyBound: true,
+        keyExported: false
+      },
+      stepHistory: [
+        {
+          stepId: "human-approval",
+          attempt: 1,
+          status: "succeeded",
+          approval: {
+            state: "approved",
+            inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json"
+          }
+        },
+        {
+          stepId: "notify-operator",
+          attempt: 1,
+          status: "retryable-failed",
+          retry: {
+            retryable: true,
+            nextAttemptAt: "2026-05-30T00:00:06.000Z",
+            reasonExported: false
+          }
+        },
+        {
+          stepId: "notify-operator",
+          attempt: 2,
+          status: "succeeded",
+          evidenceRefIds: ["evb_controlled_pilot_retry"]
+        }
+      ]
+    });
+    expect(approvedExport.publicSafe.evidenceRefs).toEqual([
+      expect.objectContaining({
+        id: "evb_controlled_pilot_retry",
+        uri: "artifacts/evidence/controlled-pilot/retry-bundle.json",
+        dataClassification: "public"
+      })
+    ]);
+    expect(
+      approvedExport.publicSafe.recoveryReplay.stepHistory.map((step) => step.auditEventIds)
+    ).toEqual([
+      [
+        `audit.${approved.run.runId}.000002`,
+        `audit.${approved.run.runId}.000003`
+      ],
+      [
+        `audit.${approved.run.runId}.000004`,
+        `audit.${approved.run.runId}.000005`,
+        `audit.${approved.run.runId}.000006`
+      ],
+      [
+        `audit.${approved.run.runId}.000007`,
+        `audit.${approved.run.runId}.000008`
+      ]
+    ]);
+    expect(approvedExport.publicSafe.auditEvents.map((event) => event.id)).not.toEqual(
+      expect.arrayContaining([
+        "audit.other-controlled-pilot-run.000001",
+        `audit.${approved.run.runId}.999998`,
+        `audit.${approved.run.runId}.999999`
+      ])
+    );
+    expect(JSON.stringify(approvedExport.publicSafe)).not.toContain(
+      "local fake endpoint temporarily unavailable"
+    );
+
+    const rejectedPackage = createPilotPackage();
+    rejectedPackage.approval = {
+      ...rejectedPackage.approval!,
+      state: "rejected",
+      reason: "Reject the synthetic notification dry-run for operator review."
+    };
+    const rejectedRoot = await createTempRoot();
+    const rejectedStateRoot = join(rejectedRoot, "runs");
+    const rejectedAuditPath = join(rejectedRoot, "audit", "pilot.audit.jsonl");
+
+    const rejected = await runSelectedControlledPilot({
+      inputPackage: rejectedPackage,
+      stateRoot: rejectedStateRoot,
+      auditPath: rejectedAuditPath,
+      notificationTransport: createFakeHttpNotificationTransport()
+    });
+    const rejectedExport = await createAuditEvidenceExport({
+      statePath: join(rejectedStateRoot, `${rejected.run.runId}.jsonl`),
+      auditPath: rejectedAuditPath
+    });
+
+    expect(rejectedExport.publicSafe.recoveryReplay).toMatchObject({
+      run: {
+        status: "failed",
+        terminalState: "failed",
+        recoveryClassification: "blocked",
+        replayAction: "operator-review-required"
+      },
+      stepHistory: [
+        {
+          stepId: "human-approval",
+          attempt: 1,
+          status: "blocked",
+          recovery: {
+            state: "blocked",
+            decision: "block-run",
+            reasonExported: false
+          },
+          approval: {
+            state: "rejected",
+            decidedAt: rejectedPackage.approval.decidedAt,
+            inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+            reasonExported: false,
+            decidedByExported: false
+          }
+        }
+      ]
+    });
+    expect(JSON.stringify(rejectedExport.publicSafe)).not.toContain(
+      "Reject the synthetic notification dry-run for operator review."
+    );
+    expect(JSON.stringify(rejectedExport.publicSafe)).not.toContain("pilot-owner");
   });
 });
 

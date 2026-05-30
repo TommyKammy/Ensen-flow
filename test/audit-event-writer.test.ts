@@ -270,6 +270,156 @@ describe("neutral audit event writer", () => {
     );
   });
 
+  it("filters audit summaries and replay IDs by run, workflow, and version", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, auditRoot);
+    const statePath = join(stateRoot, "runs", "scoped-audit-replay.jsonl");
+    const auditPath = join(auditRoot, "audit", "scoped-audit-replay.audit.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "deterministic-run",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v2",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "deterministic-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "deterministic-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: { ok: true }
+    });
+
+    const scopedAuditEvent = (
+      id: string,
+      scope: { runId: string; workflowId: string; workflowVersion: string }
+    ) => ({
+      id,
+      type: "step.completed",
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      actor: { type: "system", id: "ensen-flow.local-runner" },
+      source: { type: "runner", id: "ensen-flow.local-runner" },
+      workflow: { id: scope.workflowId, version: scope.workflowVersion },
+      run: { id: scope.runId },
+      step: { id: "collect-input", attempt: 1 },
+      outcome: { status: "succeeded" }
+    });
+    await mkdir(dirname(auditPath), { recursive: true });
+    await writeFile(
+      auditPath,
+      [
+        scopedAuditEvent("audit.deterministic-run.000001", {
+          runId: "deterministic-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.other-run.000001", {
+          runId: "other-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.deterministic-run.000002", {
+          runId: "deterministic-run",
+          workflowId: "other-workflow",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.deterministic-run.000003", {
+          runId: "deterministic-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v1"
+        })
+      ]
+        .map((event) => JSON.stringify(event))
+        .join("\n") + "\n",
+      "utf8"
+    );
+
+    const exported = await createAuditEvidenceExport({ statePath, auditPath });
+
+    expect(exported.publicSafe.auditEvents.map((event) => event.id)).toEqual([
+      "audit.deterministic-run.000001"
+    ]);
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        stepId: "collect-input",
+        attempt: 1,
+        auditEventIds: ["audit.deterministic-run.000001"]
+      })
+    ]);
+  });
+
+  it("treats manual-repair-needed step attempts as non-recoverable in replay export", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "manual-repair-needed.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "manual-repair-needed",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "manual-repair-needed",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.failed",
+      runId: "manual-repair-needed",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      retry: {
+        retryable: false,
+        reason: "Operator must repair external state before replay."
+      },
+      recovery: {
+        state: "manual-repair-needed",
+        decision: "manual-repair-needed",
+        reason: "Operator must repair external state before replay."
+      }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay).toMatchObject({
+      run: {
+        status: "running",
+        recoveryClassification: "manual-repair-needed",
+        replayAction: "operator-review-required"
+      },
+      stepHistory: [
+        expect.objectContaining({
+          stepId: "collect-input",
+          attempt: 1,
+          status: "manual-repair-needed"
+        })
+      ]
+    });
+  });
+
   it("omits non-public evidence paths from public-safe exports", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot);
@@ -540,6 +690,185 @@ describe("neutral audit event writer", () => {
     await expect(readFile(outputPath, "utf8")).resolves.toContain(
       "omitted an evidence reference because its data classification is missing"
     );
+  });
+
+  it("does not export unknown approval checkpoint states from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "unknown-approval-state.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "unknown-approval-state",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "unknown-approval-state",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "unknown-approval-state",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "raw-customer-approval-note",
+            inputRef: "fixtures/manual-review/input.json",
+            decidedAt: "2026-04-29T00:00:03.000Z"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "unknown-approval-state",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.not.objectContaining({
+        approval: expect.anything()
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("raw-customer-approval-note");
+  });
+
+  it("does not export unclassified approval input refs from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "unclassified-approval-input-ref.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "unclassified-approval-input-ref",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "unclassified-approval-input-ref",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "unclassified-approval-input-ref",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "approved",
+            inputRef: "approvals/acme-contract.json",
+            decidedAt: "2026-04-29T00:00:03.000Z"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "unclassified-approval-input-ref",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        approval: {
+          state: "approved",
+          decidedAt: "2026-04-29T00:00:03.000Z",
+          reasonExported: false,
+          decidedByExported: false
+        }
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("approvals/acme-contract.json");
+  });
+
+  it("does not export malformed approval decision timestamps from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "malformed-approval-decided-at.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "malformed-approval-decided-at",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "malformed-approval-decided-at",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "malformed-approval-decided-at",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "approved",
+            inputRef: "fixtures/manual-review/input.json",
+            inputRefDataClassification: "public",
+            decidedAt: "not-a-timestamp"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "malformed-approval-decided-at",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        approval: {
+          state: "approved",
+          inputRef: "fixtures/manual-review/input.json",
+          reasonExported: false,
+          decidedByExported: false
+        }
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("not-a-timestamp");
   });
 
   it("rejects extra export-audit-evidence CLI arguments", async () => {

@@ -175,22 +175,26 @@ node dist/cli.js export-audit-evidence <state-jsonl-path> [audit-jsonl-path] [--
 
 The export intentionally separates `publicSafe` metadata from
 `localConfidentialReferences`. Public-safe fields summarize run status, trigger
-type, step attempts, neutral audit event summaries, and any public-safe
-`eip.evidence-bundle-ref.v1` references found in step result metadata. Trigger
-context, idempotency key values, raw local state paths, raw audit paths,
-workstation-local evidence paths, secrets, customer data, production evidence
-locations, and local confidential reference values are not exported into the
-public-safe section. The export boundary uses the copied Protocol v0.4.0
-operational evidence and Track B classification vocabulary for public data
-classification, bounded producer metadata, retention hints, checksum presence,
-and confidential reference policy facts without claiming production evidence
-readiness or regulated workflow execution. Track B evidence references must
-carry an explicit `dataClassification` before entering public-safe output;
-missing values are omitted as unclassified references, and unknown values fail
-closed before an export artifact is written. `file_uri` evidence references are
-omitted from public-safe exports until Flow adopts a deliberately public mapping;
-portable relative `local_path` references remain exportable only when they are
-explicitly classified as `public`. Internal, customer-confidential, regulated,
+type, step attempts, neutral audit event summaries, recovery replay status, and
+any public-safe `eip.evidence-bundle-ref.v1` references found in step result
+metadata. The recovery replay summary ties projected run state to neutral audit
+event IDs, retry facts, approval checkpoint states, blocked outcomes, and
+public evidence reference IDs without exporting raw reasons, approver IDs, or
+idempotency key values. Trigger context, idempotency key values, raw local state
+paths, raw audit paths, workstation-local evidence paths, secrets, customer
+data, production evidence locations, and local confidential reference values are
+not exported into the public-safe section. The export boundary uses copied
+Protocol v0.3.0 operational evidence profile and Protocol v0.4.0 Track B
+classification boundary snapshots for public data classification, bounded
+producer metadata, retention hints, checksum presence, and confidential
+reference policy facts without claiming production evidence readiness or
+regulated workflow execution. Track B evidence references must carry an explicit
+`dataClassification` before entering public-safe output; missing values are
+omitted as unclassified references, and unknown values fail closed before an
+export artifact is written. `file_uri` evidence references are omitted from
+public-safe exports until Flow adopts a deliberately public mapping; portable
+relative `local_path` references remain exportable only when they are explicitly
+classified as `public`. Internal, customer-confidential, regulated,
 confidential, and restricted evidence references stay out of the public-safe
 export surface.
 

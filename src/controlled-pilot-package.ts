@@ -21,6 +21,11 @@ export const controlledPilotInputPackageSchemaVersion =
   "flow.controlled-pilot.input-package.v1";
 export const selectedControlledPilotId = "webhook-review-notification";
 const selectedControlledPilotWebhookPath = "/hooks/controlled-pilot";
+const selectedControlledPilotTransportBoundaryModes = new Set([
+  "fake",
+  "local",
+  "dry-run"
+]);
 
 export type ControlledPilotInputPackageMode = "dry-run";
 export type ControlledPilotApprovalState = "approved" | "rejected";
@@ -128,6 +133,7 @@ export const runSelectedControlledPilot = async (
   });
   const notificationTransport =
     input.notificationTransport ?? createFakeHttpNotificationTransport();
+  assertSelectedControlledPilotTransportBoundary(notificationTransport);
   const notificationConnector = createHttpNotificationConnector({
     transport: notificationTransport,
     now: input.now
@@ -220,6 +226,19 @@ export const runSelectedControlledPilot = async (
       };
     }
   });
+};
+
+const assertSelectedControlledPilotTransportBoundary = (
+  transport: HttpNotificationTransport
+): void => {
+  if (
+    transport.inputBoundary === undefined ||
+    !selectedControlledPilotTransportBoundaryModes.has(transport.inputBoundary.mode)
+  ) {
+    throw new Error(
+      "selected controlled pilot notification transport must declare a fake, local, or dry-run input boundary"
+    );
+  }
 };
 
 const validateControlledPilotInputPackage = (

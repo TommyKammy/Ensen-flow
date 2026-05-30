@@ -31,6 +31,7 @@ const WEBHOOK_INPUT_ALLOWED_KEYS = new Set([
   "headers",
   "payload"
 ]);
+const RESERVED_TRIGGER_CONTEXT_KEYS = new Set(["requestId", "webhook"]);
 const BLOCKED_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
@@ -108,6 +109,7 @@ export const consumeWebhookInput = async (
     rejectCredentialShapedKeys(normalizedInput.payload, "webhook input payload");
     rejectUnsafeWebhookArtifactValues(normalizedInput.payload, "webhook input payload");
   }
+  rejectReservedAdditionalTriggerContextKeys(options.additionalTriggerContext);
 
   return runWorkflow({
     definition,
@@ -115,6 +117,7 @@ export const consumeWebhookInput = async (
     auditPath: options.auditPath,
     runId,
     triggerContext: {
+      ...(options.additionalTriggerContext ?? {}),
       requestId: normalizedInput.requestId,
       webhook: {
         inputFingerprint,
@@ -122,8 +125,7 @@ export const consumeWebhookInput = async (
         receivedAt: normalizedInput.receivedAt,
         ...(normalizedInput.headers === undefined ? {} : { headers: normalizedInput.headers }),
         payload: normalizedInput.payload
-      },
-      ...(options.additionalTriggerContext ?? {})
+      }
     },
     existingRunStateArtifactHygiene: "skip",
     existingRunStateGuard: (existingState) => {
@@ -134,6 +136,22 @@ export const consumeWebhookInput = async (
     now: options.now,
     stepHandler: options.stepHandler
   });
+};
+
+const rejectReservedAdditionalTriggerContextKeys = (
+  value: Record<string, unknown> | undefined
+): void => {
+  if (value === undefined) {
+    return;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (RESERVED_TRIGGER_CONTEXT_KEYS.has(key)) {
+      throw new WebhookIntakeRejectedError(
+        `${key} is reserved for normalized webhook trigger metadata`
+      );
+    }
+  }
 };
 
 const assertWebhookWorkflow = (definition: WorkflowDefinition): WebhookWorkflowDefinition => {

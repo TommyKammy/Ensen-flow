@@ -399,6 +399,13 @@ class WorkflowStepOutcomeError extends Error {
   }
 }
 
+class WorkflowStepApprovalAuditValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkflowStepApprovalAuditValidationError";
+  }
+}
+
 const normalizeStepHandlerResult = (
   result: WorkflowStepHandlerResult
 ): NormalizedWorkflowStepHandlerResult | undefined => {
@@ -421,7 +428,8 @@ const errorStepResult = (error: unknown): WorkflowStepAttemptResultMetadata | un
   error instanceof WorkflowStepOutcomeError ? error.result : undefined;
 
 const isWorkflowStepNonRetryableError = (error: unknown): boolean =>
-  error instanceof WorkflowStepNonRetryableError;
+  error instanceof WorkflowStepNonRetryableError ||
+  error instanceof WorkflowStepApprovalAuditValidationError;
 
 const approvalAuditContextFromStepResult = (
   stepResult: WorkflowStepAttemptResultMetadata | undefined
@@ -441,7 +449,9 @@ const approvalAuditContextFromStepResult = (
   }
 
   if (approval.schemaVersion !== "flow.approval-checkpoint.v1") {
-    throw new Error("step handler approvalCheckpoint schemaVersion is invalid");
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint schemaVersion is invalid"
+    );
   }
 
   if (
@@ -451,7 +461,9 @@ const approvalAuditContextFromStepResult = (
     typeof approval.inputRef !== "string" ||
     typeof approval.inputFingerprint !== "string"
   ) {
-    throw new Error("step handler approvalCheckpoint has malformed audit fields");
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint has malformed audit fields"
+    );
   }
 
   if (
@@ -459,15 +471,21 @@ const approvalAuditContextFromStepResult = (
     approval.state !== "approved" &&
     approval.state !== "rejected"
   ) {
-    throw new Error("step handler approvalCheckpoint state is invalid");
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint state is invalid"
+    );
   }
 
   if (approval.decidedBy !== undefined && typeof approval.decidedBy !== "string") {
-    throw new Error("step handler approvalCheckpoint decidedBy is invalid");
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint decidedBy is invalid"
+    );
   }
 
   if (approval.decidedAt !== undefined && typeof approval.decidedAt !== "string") {
-    throw new Error("step handler approvalCheckpoint decidedAt is invalid");
+    throw new WorkflowStepApprovalAuditValidationError(
+      "step handler approvalCheckpoint decidedAt is invalid"
+    );
   }
 
   const auditContext: NeutralAuditApprovalContext = {
@@ -484,7 +502,9 @@ const approvalAuditContextFromStepResult = (
     validateNeutralAuditApprovalContext(auditContext);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`step handler approvalCheckpoint is invalid: ${reason}`);
+    throw new WorkflowStepApprovalAuditValidationError(
+      `step handler approvalCheckpoint is invalid: ${reason}`
+    );
   }
 
   return auditContext;

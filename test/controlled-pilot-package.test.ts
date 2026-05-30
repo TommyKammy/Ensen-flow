@@ -14,7 +14,8 @@ import {
 } from "../src/index.js";
 import type {
   ControlledPilotInputPackage,
-  FakeHttpNotificationTransport
+  FakeHttpNotificationTransport,
+  HttpNotificationTransport
 } from "../src/index.js";
 
 const tempRoots: string[] = [];
@@ -142,6 +143,49 @@ describe("selected controlled pilot dry-run package", () => {
       },
       inputFingerprint: inputPackage.approval!.inputFingerprint
     });
+  });
+
+  it("rejects real notification transports for the selected dry-run pilot", async () => {
+    const inputPackage = createPilotPackage();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    let deliveries = 0;
+    const realTransport: HttpNotificationTransport = {
+      inputBoundary: {
+        mode: "real",
+        dryRunFirstEvidence: {
+          mode: "dry-run",
+          reference: "docs/connector-capability-matrix.md"
+        },
+        override: {
+          approvedBy: "pilot-owner",
+          approvedAt: "2026-05-30T00:00:00.000Z",
+          reason: "Synthetic override is not valid for the selected dry-run pilot."
+        }
+      },
+      deliver() {
+        deliveries += 1;
+        return {
+          status: "succeeded",
+          summary: "real transport accepted notification"
+        };
+      }
+    };
+
+    await expect(
+      runSelectedControlledPilot({
+        inputPackage,
+        stateRoot,
+        auditPath,
+        notificationTransport: realTransport
+      })
+    ).rejects.toThrow(
+      "selected controlled pilot notification transport must declare a fake, local, or dry-run input boundary"
+    );
+
+    expect(deliveries).toBe(0);
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects approval bound to a raw webhook fingerprint before notification", async () => {

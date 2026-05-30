@@ -1247,6 +1247,83 @@ describe("sequential workflow runner", () => {
     );
   });
 
+  it("does not retry when accepted executor output has invalid approval audit context", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [
+      {
+        id: "notify-operator",
+        action: {
+          type: "notification",
+          name: "operator_notice"
+        },
+        retry: {
+          maxAttempts: 2,
+          backoff: {
+            strategy: "fixed",
+            delayMs: 1000
+          }
+        }
+      }
+    ];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let calls = 0;
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-accepted-invalid-approval"
+      },
+      now: createClock([
+        "2026-04-29T00:10:00.000Z",
+        "2026-04-29T00:10:01.000Z",
+        "2026-04-29T00:10:02.000Z",
+        "2026-04-29T00:10:03.000Z",
+        "2026-04-29T00:10:04.000Z"
+      ]),
+      stepHandler: () => {
+        calls += 1;
+        return {
+          requestId: "req_accepted_invalid_approval",
+          status: "succeeded",
+          observedAt: "2026-04-29T00:10:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "accepted side effect with malformed approval context",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-accepted-invalid",
+                state: "approved",
+                reason: "Approval is missing the approver audit fields.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        } satisfies ExecutorConnectorStatusSnapshot;
+      }
+    });
+
+    expect(calls).toBe(1);
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "step handler approvalCheckpoint is invalid: audit event approval.decidedBy is required for approved or rejected approval states"
+        }
+      }
+    ]);
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.map((event) => event.type)).not.toContain("step.retry.scheduled");
+  });
+
   it("records failed attempts when non-success approval audit validation fails", async () => {
     const definition = readWorkflowFixture("simple-manual.valid.json");
     definition.steps = [definition.steps[0]];

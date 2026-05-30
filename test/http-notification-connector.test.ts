@@ -112,6 +112,30 @@ describe("HTTP notification connector skeleton", () => {
     expect(transport.deliveries).toHaveLength(1);
   });
 
+  it("keeps the exported fake transport default evidence neutral", async () => {
+    const transport = createFakeHttpNotificationTransport();
+    const connector = createHttpNotificationConnector({
+      transport,
+      now: () => "2026-05-02T03:00:00.000Z"
+    });
+
+    const submitted = await connector.submit(notifyRequest);
+
+    expect(submitted).toMatchObject({
+      ok: true,
+      value: {
+        evidence: {
+          kind: "http-notification-local",
+          endpointAlias: "local-operator-notification",
+          attempt: 1,
+          idempotencyKey: "notification-demo-run:notify-operator:attempt-1"
+        }
+      }
+    });
+    expect(JSON.stringify(submitted)).not.toContain("controlled-pilot");
+    expect(JSON.stringify(submitted)).not.toContain("eip.evidence-bundle-ref.v1");
+  });
+
   it("rejects unsafe notification artifact values with sanitized diagnostics", async () => {
     const transport = createFakeHttpNotificationTransport();
     const connector = createHttpNotificationConnector({ transport });

@@ -11,6 +11,7 @@ import {
   createNormalizedWebhookInputFingerprint
 } from "./webhook-intake.js";
 import type {
+  HttpNotificationOutcome,
   HttpNotificationTarget,
   HttpNotificationTransport
 } from "./http-notification-connector.js";
@@ -27,6 +28,21 @@ const selectedControlledPilotTransportBoundaryModes = new Set([
   "local",
   "dry-run"
 ]);
+const selectedControlledPilotDefaultNotificationOutcome: HttpNotificationOutcome = {
+  status: "succeeded",
+  summary: "local fake notification accepted",
+  evidence: {
+    evidenceBundleRef: {
+      schemaVersion: "eip.evidence-bundle-ref.v1",
+      id: "evb_controlled_pilot_default_fake_notification",
+      correlationId: "corr_controlled_pilot_default_fake_notification",
+      type: "local_path",
+      uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+      createdAt: "2026-05-30T00:00:00.000Z",
+      dataClassification: "public"
+    }
+  }
+};
 
 export type ControlledPilotInputPackageMode = "dry-run";
 export type ControlledPilotApprovalState = "approved" | "rejected";
@@ -139,7 +155,10 @@ export const runSelectedControlledPilot = async (
     inputFingerprint
   });
   const notificationTransport =
-    input.notificationTransport ?? createFakeHttpNotificationTransport();
+    input.notificationTransport ??
+    createFakeHttpNotificationTransport({
+      outcomes: [selectedControlledPilotDefaultNotificationOutcome]
+    });
   assertSelectedControlledPilotTransportBoundary(notificationTransport);
   const notificationConnector = createHttpNotificationConnector({
     transport: notificationTransport,

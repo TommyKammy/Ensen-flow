@@ -598,6 +598,67 @@ describe("neutral audit event writer", () => {
     expect(JSON.stringify(exported.publicSafe)).not.toContain("raw-customer-approval-note");
   });
 
+  it("does not export malformed approval decision timestamps from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "malformed-approval-decided-at.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "malformed-approval-decided-at",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "malformed-approval-decided-at",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "malformed-approval-decided-at",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "approved",
+            inputRef: "fixtures/manual-review/input.json",
+            decidedAt: "not-a-timestamp"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "malformed-approval-decided-at",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        approval: {
+          state: "approved",
+          inputRef: "fixtures/manual-review/input.json",
+          reasonExported: false,
+          decidedByExported: false
+        }
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("not-a-timestamp");
+  });
+
   it("rejects extra export-audit-evidence CLI arguments", async () => {
     const originalError = console.error;
     const errors: string[] = [];

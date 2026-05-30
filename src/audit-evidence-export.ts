@@ -212,6 +212,8 @@ export interface AuditEvidenceExportLocalReference {
 const EXPORT_SCHEMA_VERSION = "flow.audit-evidence-export.v1";
 const EVIDENCE_REF_SCHEMA_VERSION = "eip.evidence-bundle-ref.v1";
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const EXPORTABLE_APPROVAL_STATES = new Set<AuditEvidenceExportApprovalState>([
   "approval-required",
   "approved",
@@ -574,7 +576,9 @@ const findApprovalCheckpoint = (
       ...(typeof value.inputRef === "string" && isPublicSafeRelativeRef(value.inputRef)
         ? { inputRef: value.inputRef }
         : {}),
-      ...(typeof value.decidedAt === "string" ? { decidedAt: value.decidedAt } : {})
+      ...(typeof value.decidedAt === "string" && isStrictUtcMillisTimestamp(value.decidedAt)
+        ? { decidedAt: value.decidedAt }
+        : {})
     };
   }
 
@@ -593,6 +597,15 @@ const isExportableApprovalState = (
 ): value is AuditEvidenceExportApprovalState =>
   typeof value === "string" &&
   EXPORTABLE_APPROVAL_STATES.has(value as AuditEvidenceExportApprovalState);
+
+const isStrictUtcMillisTimestamp = (value: string): boolean => {
+  if (!ISO_UTC_MILLIS_TIMESTAMP_PATTERN.test(value)) {
+    return false;
+  }
+
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+};
 
 const evidenceRefIdsFromAttempt = (attempt: WorkflowStepAttemptEventSummary): string[] => {
   if (attempt.result === undefined) {

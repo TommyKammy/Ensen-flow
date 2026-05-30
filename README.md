@@ -9,7 +9,9 @@ minimal TypeScript scaffold plus the initial standalone workflow definition
 schema, append-only JSONL workflow run state helpers, a local sequential runner,
 neutral audit JSONL events, a bounded local schedule trigger evaluator, and a
 bounded local webhook intake helper, and a bounded local file connector
-skeleton for fixture read/write actions. It also exposes a local audit and
+skeleton for fixture read/write actions. It also exposes a selected controlled
+pilot dry-run package for webhook review to HTTP notification with an explicit
+human approval checkpoint. It also exposes a local audit and
 evidence metadata export skeleton for JSONL run state. It does not implement
 production evidence archives, compliance bundles, customer data exports,
 executor connectors, Ensen-loop integration, ERPNext behavior, or Pharma/GxP
@@ -145,6 +147,17 @@ shape for workflow start, step start, step completion, step failure, retry
 scheduling, and workflow completion or failure. Each record includes a stable
 event ID, timestamp, actor and source context, workflow and run references, and
 step references where applicable.
+
+The selected controlled pilot package lives at
+`fixtures/controlled-pilot/webhook-review-notification.dry-run.json`, with its
+schema documented by `fixtures/controlled-pilot/input-package.schema.json`.
+`runSelectedControlledPilot` keeps the webhook review to HTTP notification path
+dry-run first by default, records approved, rejected, or missing human approval
+checkpoint context in JSONL run state and neutral audit events, and fails closed
+before notification delivery when approval is missing, rejected, or bound to a
+different input fingerprint. These records are pilot control facts only, not
+electronic signatures, production approvals, final disposition decisions, or
+compliance evidence.
 
 The built CLI can export public-safe audit and evidence metadata from local run
 state after `npm run build`:

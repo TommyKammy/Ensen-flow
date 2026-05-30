@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "flow.controlled-pilot.input-package.v1",
+  "title": "Ensen-flow controlled pilot input package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "pilotId",
+    "mode",
+    "inputRef",
+    "webhook",
+    "notification"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "flow.controlled-pilot.input-package.v1"
+    },
+    "pilotId": {
+      "const": "webhook-review-notification"
+    },
+    "mode": {
+      "const": "dry-run"
+    },
+    "inputRef": {
+      "type": "string",
+      "pattern": "^fixtures/controlled-pilot/[a-z0-9.-]+\\.json$"
+    },
+    "webhook": {
+      "type": "object"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpointId",
+        "state",
+        "decidedBy",
+        "decidedAt",
+        "reason",
+        "inputRef",
+        "inputFingerprint"
+      ],
+      "properties": {
+        "checkpointId": {
+          "type": "string"
+        },
+        "state": {
+          "enum": ["approved", "rejected"]
+        },
+        "decidedBy": {
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "inputRef": {
+          "type": "string"
+        },
+        "inputFingerprint": {
+          "type": "string"
+        }
+      }
+    },
+    "notification": {
+      "type": "object"
+    }
+  }
+}

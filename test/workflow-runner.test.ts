@@ -1113,6 +1113,342 @@ describe("sequential workflow runner", () => {
     ]);
   });
 
+  it("rejects malformed approval audit fields before persisting handler output", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-malformed-approval"
+      },
+      now: createClock([
+        "2026-04-29T00:07:00.000Z",
+        "2026-04-29T00:07:01.000Z",
+        "2026-04-29T00:07:02.000Z",
+        "2026-04-29T00:07:03.000Z",
+        "2026-04-29T00:07:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_malformed_approval",
+          status: "succeeded",
+          observedAt: "2026-04-29T00:07:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "malformed approval should not be forwarded",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-001",
+                state: "approved",
+                reason: "Approval is missing the approver audit fields.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "step handler approvalCheckpoint is invalid: audit event approval.decidedBy is required for approved or rejected approval states"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
+  it("rejects malformed approval decidedAt before appending completed state", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-malformed-approval-date"
+      },
+      now: createClock([
+        "2026-04-29T00:08:00.000Z",
+        "2026-04-29T00:08:01.000Z",
+        "2026-04-29T00:08:02.000Z",
+        "2026-04-29T00:08:03.000Z",
+        "2026-04-29T00:08:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_malformed_approval_date",
+          status: "succeeded",
+          observedAt: "2026-04-29T00:08:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "malformed approval decidedAt should not be forwarded",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-002",
+                state: "approved",
+                decidedBy: "pilot-owner",
+                decidedAt: "2026-04-29T00:08:02Z",
+                reason: "Approval has a non-strict decision timestamp.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "step handler approvalCheckpoint is invalid: audit event approval.decidedAt must be an ISO timestamp string"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.status).toBe("failed");
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "step.completed"
+        })
+      ])
+    );
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
+  it("does not retry when accepted executor output has invalid approval audit context", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [
+      {
+        id: "notify-operator",
+        action: {
+          type: "notification",
+          name: "operator_notice"
+        },
+        retry: {
+          maxAttempts: 2,
+          backoff: {
+            strategy: "fixed",
+            delayMs: 1000
+          }
+        }
+      }
+    ];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+    let calls = 0;
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-accepted-invalid-approval"
+      },
+      now: createClock([
+        "2026-04-29T00:10:00.000Z",
+        "2026-04-29T00:10:01.000Z",
+        "2026-04-29T00:10:02.000Z",
+        "2026-04-29T00:10:03.000Z",
+        "2026-04-29T00:10:04.000Z"
+      ]),
+      stepHandler: () => {
+        calls += 1;
+        return {
+          requestId: "req_accepted_invalid_approval",
+          status: "succeeded",
+          observedAt: "2026-04-29T00:10:02.000Z",
+          result: {
+            status: "succeeded",
+            summary: "accepted side effect with malformed approval context",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-accepted-invalid",
+                state: "approved",
+                reason: "Approval is missing the approver audit fields.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        } satisfies ExecutorConnectorStatusSnapshot;
+      }
+    });
+
+    expect(calls).toBe(1);
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason:
+            "step handler approvalCheckpoint is invalid: audit event approval.decidedBy is required for approved or rejected approval states"
+        }
+      }
+    ]);
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.map((event) => event.type)).not.toContain("step.retry.scheduled");
+  });
+
+  it("records failed attempts when non-success approval audit validation fails", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-malformed-non-success-approval"
+      },
+      now: createClock([
+        "2026-04-29T00:09:00.000Z",
+        "2026-04-29T00:09:01.000Z",
+        "2026-04-29T00:09:02.000Z",
+        "2026-04-29T00:09:03.000Z",
+        "2026-04-29T00:09:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_malformed_non_success_approval",
+          status: "approval-required",
+          observedAt: "2026-04-29T00:09:02.000Z",
+          result: {
+            status: "blocked",
+            summary: "malformed approval-required checkpoint should not block persistence",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-003",
+                state: "approval-required",
+                decidedAt: 42,
+                reason: "Approval is required.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "step handler approvalCheckpoint decidedAt is invalid"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
+  it("rejects approval checkpoints whose state conflicts with executor outcome", async () => {
+    const definition = readWorkflowFixture("simple-manual.valid.json");
+    definition.steps = [definition.steps[0]];
+    const statePath = await createTempStatePath();
+    const auditPath = await createTempAuditPath();
+
+    const result = await runWorkflow({
+      definition,
+      statePath,
+      auditPath,
+      triggerContext: {
+        requestId: "manual-mismatched-approval-state"
+      },
+      now: createClock([
+        "2026-04-29T00:11:00.000Z",
+        "2026-04-29T00:11:01.000Z",
+        "2026-04-29T00:11:02.000Z",
+        "2026-04-29T00:11:03.000Z",
+        "2026-04-29T00:11:04.000Z"
+      ]),
+      stepHandler: () =>
+        ({
+          requestId: "req_mismatched_approval_state",
+          status: "approval-required",
+          observedAt: "2026-04-29T00:11:02.000Z",
+          result: {
+            status: "blocked",
+            summary: "Approval state should not override executor recovery.",
+            output: {
+              approvalCheckpoint: {
+                schemaVersion: "flow.approval-checkpoint.v1",
+                checkpointId: "approval-004",
+                state: "approved",
+                decidedBy: "pilot-owner",
+                decidedAt: "2026-04-29T00:11:02.000Z",
+                reason: "Approval state conflicts with executor outcome.",
+                inputRef: "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+                inputFingerprint: "placeholder-fingerprint"
+              }
+            }
+          }
+        }) satisfies ExecutorConnectorStatusSnapshot
+    });
+
+    expect(result.run.status).toBe("failed");
+    expect(result.stepAttempts["collect-input"]).toMatchObject([
+      {
+        attempt: 1,
+        status: "failed",
+        retry: {
+          retryable: false,
+          reason: "step handler approvalCheckpoint state must match executor.status"
+        }
+      }
+    ]);
+    const persisted = await readWorkflowRunState(statePath);
+    expect(persisted.stepAttempts["collect-input"][0]?.result).toBeUndefined();
+    const auditEvents = await readAuditEvents(auditPath);
+    expect(auditEvents.find((event) => event.type === "step.failed")).not.toHaveProperty(
+      "approval"
+    );
+  });
+
   it.each([
     {
       executorStatus: "succeeded",

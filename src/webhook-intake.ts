@@ -31,6 +31,7 @@ const WEBHOOK_INPUT_ALLOWED_KEYS = new Set([
   "headers",
   "payload"
 ]);
+const RESERVED_TRIGGER_CONTEXT_KEYS = new Set(["requestId", "webhook"]);
 const BLOCKED_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
@@ -63,6 +64,9 @@ export interface ConsumeWebhookInputOptions {
   stateRoot: string;
   auditPath?: string;
   input: WebhookInput;
+  additionalTriggerContext?: Record<string, unknown>;
+  existingRunStateGuard?: (existingState: WorkflowRunState) => void;
+  recoverApprovalRequiredStepIds?: readonly string[];
   now?: () => string;
   stepHandler?: WorkflowStepHandler;
 }
@@ -75,6 +79,11 @@ export class WebhookIntakeRejectedError extends Error {
 }
 
 export const webhookInputSchemaVersion = WEBHOOK_INPUT_SCHEMA_VERSION;
+
+export const createNormalizedWebhookInputFingerprint = (
+  input: WebhookInput,
+  expectedPath: string
+): string => createWebhookInputFingerprint(normalizeWebhookInput(input, expectedPath));
 
 type WebhookWorkflowDefinition = WorkflowDefinition & {
   trigger: {
@@ -95,10 +104,12 @@ export const consumeWebhookInput = async (
   const existingState = await readExistingWebhookRunState(statePath);
   if (existingState !== undefined) {
     assertWebhookInputMatchesState(existingState, inputFingerprint);
+    options.existingRunStateGuard?.(existingState);
   } else {
     rejectCredentialShapedKeys(normalizedInput.payload, "webhook input payload");
     rejectUnsafeWebhookArtifactValues(normalizedInput.payload, "webhook input payload");
   }
+  rejectReservedAdditionalTriggerContextKeys(options.additionalTriggerContext);
 
   return runWorkflow({
     definition,
@@ -106,6 +117,7 @@ export const consumeWebhookInput = async (
     auditPath: options.auditPath,
     runId,
     triggerContext: {
+      ...(options.additionalTriggerContext ?? {}),
       requestId: normalizedInput.requestId,
       webhook: {
         inputFingerprint,
@@ -116,11 +128,30 @@ export const consumeWebhookInput = async (
       }
     },
     existingRunStateArtifactHygiene: "skip",
-    existingRunStateGuard: (existingState) =>
-      assertWebhookInputMatchesState(existingState, inputFingerprint),
+    existingRunStateGuard: (existingState) => {
+      assertWebhookInputMatchesState(existingState, inputFingerprint);
+      options.existingRunStateGuard?.(existingState);
+    },
+    recoverApprovalRequiredStepIds: options.recoverApprovalRequiredStepIds,
     now: options.now,
     stepHandler: options.stepHandler
   });
+};
+
+const rejectReservedAdditionalTriggerContextKeys = (
+  value: Record<string, unknown> | undefined
+): void => {
+  if (value === undefined) {
+    return;
+  }
+
+  for (const key of Object.keys(value)) {
+    if (RESERVED_TRIGGER_CONTEXT_KEYS.has(key)) {
+      throw new WebhookIntakeRejectedError(
+        `${key} is reserved for normalized webhook trigger metadata`
+      );
+    }
+  }
 };
 
 const assertWebhookWorkflow = (definition: WorkflowDefinition): WebhookWorkflowDefinition => {

@@ -378,33 +378,50 @@ const validateSubmitRequest = (request: HttpNotificationSubmitRequest): string |
     return "HTTP notification attempt must be a positive integer";
   }
 
-  if (!isRecord(request.notification)) {
+  const notificationError = validateHttpNotificationTarget(request.notification);
+  if (notificationError !== undefined) {
+    return notificationError;
+  }
+
+  const unsafeArtifact = findUnsafeWorkflowArtifactValue(
+    {
+      idempotencyKey: request.idempotencyKey
+    },
+    "notificationRequest"
+  );
+  if (unsafeArtifact !== undefined) {
+    return `HTTP notification fixture ${formatUnsafeWorkflowArtifactDiagnostic(unsafeArtifact)}`;
+  }
+
+  return undefined;
+};
+
+export const validateHttpNotificationTarget = (
+  notification: HttpNotificationTarget
+): string | undefined => {
+  if (!isRecord(notification)) {
     return "HTTP notification target must be an object";
   }
 
   if (
-    typeof request.notification.endpointAlias !== "string" ||
-    !stableAliasPattern.test(request.notification.endpointAlias)
+    typeof notification.endpointAlias !== "string" ||
+    !stableAliasPattern.test(notification.endpointAlias)
   ) {
     return "HTTP notification endpointAlias must be a stable local alias, not a URL or secret";
   }
 
-  if (
-    request.notification.method !== undefined &&
-    !["POST", "PUT", "PATCH"].includes(request.notification.method)
-  ) {
+  if (notification.method !== undefined && !["POST", "PUT", "PATCH"].includes(notification.method)) {
     return "HTTP notification method must be POST, PUT, or PATCH";
   }
 
-  const credentialKey = findCredentialShapedKey(request.notification);
+  const credentialKey = findCredentialShapedKey(notification);
   if (credentialKey !== undefined) {
     return `HTTP notification fixture must not include credential-shaped field ${credentialKey}`;
   }
 
   const unsafeArtifact = findUnsafeWorkflowArtifactValue(
     {
-      idempotencyKey: request.idempotencyKey,
-      notification: request.notification
+      notification
     },
     "notificationRequest"
   );

@@ -118,6 +118,35 @@ describe("webhook trigger controlled pilot boundary", () => {
       beforeReplay
     );
   });
+
+  it("rejects extra trigger context that would override normalized webhook metadata", async () => {
+    const definition = createWebhookWorkflow();
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "webhook.audit.jsonl");
+    const input = createWebhookInput();
+    let stepHandlerCalled = false;
+
+    await expect(
+      consumeWebhookInput({
+        definition,
+        stateRoot,
+        auditPath,
+        input,
+        additionalTriggerContext: {
+          webhook: {
+            inputFingerprint: "forged-webhook-fingerprint"
+          }
+        },
+        stepHandler: () => {
+          stepHandlerCalled = true;
+        }
+      })
+    ).rejects.toThrow("webhook is reserved for normalized webhook trigger metadata");
+
+    expect(stepHandlerCalled).toBe(false);
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 const createClock = (timestamps: string[]): (() => string) => {

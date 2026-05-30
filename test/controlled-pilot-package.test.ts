@@ -161,6 +161,46 @@ describe("selected controlled pilot dry-run package", () => {
     }
     const state = await readWorkflowRunState(join(stateRoot, `${runId}.jsonl`));
     expect(state.run.status).toBe("succeeded");
+    expect(state.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        status: "succeeded",
+        result: {
+          executor: {
+            result: {
+              evidence: {
+                transport: {
+                  dataClassification: "public",
+                  evidenceBundleRef: {
+                    schemaVersion: "eip.evidence-bundle-ref.v1",
+                    id: "evb_controlled_pilot_default_fake_notification",
+                    correlationId: "corr_controlled_pilot_default_fake_notification",
+                    type: "local_path",
+                    uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+                    createdAt: expect.stringMatching(
+                      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]);
+    const defaultEvidenceRef = (
+      state.stepAttempts["notify-operator"]?.[0]?.result as {
+        executor?: {
+          result?: {
+            evidence?: {
+              transport?: {
+                evidenceBundleRef?: Record<string, unknown>;
+              };
+            };
+          };
+        };
+      }
+    ).executor?.result?.evidence?.transport?.evidenceBundleRef;
+    expect(defaultEvidenceRef).not.toHaveProperty("dataClassification");
     await expect(readAuditEvents(auditPath)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -168,6 +208,123 @@ describe("selected controlled pilot dry-run package", () => {
           outcome: { status: "succeeded" }
         })
       ])
+    );
+  });
+
+  it("derives the default pilot evidence timestamp from the run clock", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+
+    const result = await runSelectedControlledPilot({
+      inputPackage: createPilotPackage(),
+      stateRoot,
+      auditPath,
+      now: createClock([
+        "2026-05-31T01:00:00.000Z",
+        "2026-05-31T01:00:01.000Z",
+        "2026-05-31T01:00:02.000Z",
+        "2026-05-31T01:00:03.000Z",
+        "2026-05-31T01:00:04.000Z",
+        "2026-05-31T01:00:05.000Z",
+        "2026-05-31T01:00:06.000Z"
+      ])
+    });
+
+    const notifyAttempt = result.stepAttempts["notify-operator"]?.[0]?.result as {
+      executor?: {
+        observedAt?: string;
+        result?: {
+          evidence?: {
+            transport?: {
+              evidenceBundleRef?: {
+                createdAt?: string;
+              };
+            };
+          };
+        };
+      };
+    };
+
+    expect(notifyAttempt.executor?.result?.evidence?.transport?.evidenceBundleRef).toMatchObject({
+      id: "evb_controlled_pilot_default_fake_notification",
+      createdAt: notifyAttempt.executor?.observedAt
+    });
+    expect(
+      notifyAttempt.executor?.result?.evidence?.transport?.evidenceBundleRef?.createdAt
+    ).not.toBe("2026-05-30T00:00:00.000Z");
+  });
+
+  it("exports a public-safe evidence ref from the default CLI fake transport path", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown): void => {
+      logs.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "run-controlled-pilot",
+          "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+          stateRoot,
+          auditPath
+        ])
+      ).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = JSON.parse(logs.join("\n")) as Record<string, unknown>;
+    const runId = output.runId;
+    if (typeof runId !== "string") {
+      throw new Error("CLI output runId must be a string");
+    }
+
+    logs.length = 0;
+    console.log = (message?: unknown): void => {
+      logs.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "export-audit-evidence",
+          join(stateRoot, `${runId}.jsonl`),
+          auditPath
+        ])
+      ).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const exported = JSON.parse(logs.join("\n")) as {
+      boundary: { notes: string[] };
+      publicSafe: {
+        evidenceRefs: Array<{
+          schemaVersion: string;
+          id: string;
+          type: string;
+          uri: string;
+          dataClassification: string;
+        }>;
+      };
+    };
+    expect(exported.publicSafe.evidenceRefs).toEqual([
+      expect.objectContaining({
+        schemaVersion: "eip.evidence-bundle-ref.v1",
+        id: "evb_controlled_pilot_default_fake_notification",
+        type: "local_path",
+        uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+        dataClassification: "public"
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe.evidenceRefs)).not.toContain(root);
+    expect(exported.boundary.notes.join("\n")).toContain(
+      "It is not a production evidence archive, compliance bundle, or customer data export."
     );
   });
 

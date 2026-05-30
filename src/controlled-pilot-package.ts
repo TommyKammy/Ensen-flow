@@ -11,6 +11,7 @@ import {
   createNormalizedWebhookInputFingerprint
 } from "./webhook-intake.js";
 import type {
+  HttpNotificationOutcome,
   HttpNotificationTarget,
   HttpNotificationTransport
 } from "./http-notification-connector.js";
@@ -27,6 +28,21 @@ const selectedControlledPilotTransportBoundaryModes = new Set([
   "local",
   "dry-run"
 ]);
+const selectedControlledPilotDefaultNotificationOutcome: HttpNotificationOutcome = {
+  status: "succeeded",
+  summary: "local fake notification accepted"
+};
+const createSelectedControlledPilotDefaultEvidence = (createdAt: string): Record<string, unknown> => ({
+  dataClassification: "public",
+  evidenceBundleRef: {
+    schemaVersion: "eip.evidence-bundle-ref.v1",
+    id: "evb_controlled_pilot_default_fake_notification",
+    correlationId: "corr_controlled_pilot_default_fake_notification",
+    type: "local_path",
+    uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+    createdAt
+  }
+});
 
 export type ControlledPilotInputPackageMode = "dry-run";
 export type ControlledPilotApprovalState = "approved" | "rejected";
@@ -139,7 +155,11 @@ export const runSelectedControlledPilot = async (
     inputFingerprint
   });
   const notificationTransport =
-    input.notificationTransport ?? createFakeHttpNotificationTransport();
+    input.notificationTransport ??
+    createFakeHttpNotificationTransport({
+      outcomes: [selectedControlledPilotDefaultNotificationOutcome]
+    });
+  const usesDefaultNotificationTransport = input.notificationTransport === undefined;
   assertSelectedControlledPilotTransportBoundary(notificationTransport);
   const notificationConnector = createHttpNotificationConnector({
     transport: notificationTransport,
@@ -223,6 +243,13 @@ export const runSelectedControlledPilot = async (
         throw new Error(submitted.error.message);
       }
 
+      const evidence = usesDefaultNotificationTransport
+        ? {
+            ...submitted.value.evidence,
+            transport: createSelectedControlledPilotDefaultEvidence(submitted.value.acceptedAt)
+          }
+        : submitted.value.evidence;
+
       return {
         executor: {
           requestId: submitted.value.requestId,
@@ -231,7 +258,7 @@ export const runSelectedControlledPilot = async (
           result: {
             status: "succeeded",
             summary: submitted.value.notification.summary,
-            evidence: submitted.value.evidence
+            evidence
           }
         }
       };

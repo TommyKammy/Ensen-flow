@@ -310,7 +310,12 @@ export const createFakeHttpNotificationTransport = (
   const deliveries: HttpNotificationTransportDelivery[] = [];
   const outcomes =
     input.outcomes === undefined || input.outcomes.length === 0
-      ? [{ status: "succeeded" as const, summary: "local fake notification accepted" }]
+      ? [
+          {
+            status: "succeeded" as const,
+            summary: "local fake notification accepted"
+          }
+        ]
       : input.outcomes;
 
   return {

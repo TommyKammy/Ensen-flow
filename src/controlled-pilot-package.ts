@@ -335,6 +335,7 @@ const createPendingApprovalCheckpoint = (input: {
   state: "approval-required" as const,
   reason: "human approval checkpoint is required before notification",
   inputRef: input.inputRef,
+  inputRefDataClassification: "public",
   inputFingerprint: input.inputFingerprint
 });
 
@@ -348,6 +349,7 @@ const createRecordedApprovalCheckpoint = (
   decidedAt: approval.decidedAt,
   reason: approval.reason,
   inputRef: approval.inputRef,
+  inputRefDataClassification: "public",
   inputFingerprint: approval.inputFingerprint
 });
 

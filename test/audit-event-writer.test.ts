@@ -598,6 +598,67 @@ describe("neutral audit event writer", () => {
     expect(JSON.stringify(exported.publicSafe)).not.toContain("raw-customer-approval-note");
   });
 
+  it("does not export unclassified approval input refs from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "unclassified-approval-input-ref.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "unclassified-approval-input-ref",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "unclassified-approval-input-ref",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "unclassified-approval-input-ref",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "approved",
+            inputRef: "approvals/acme-contract.json",
+            decidedAt: "2026-04-29T00:00:03.000Z"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "unclassified-approval-input-ref",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        approval: {
+          state: "approved",
+          decidedAt: "2026-04-29T00:00:03.000Z",
+          reasonExported: false,
+          decidedByExported: false
+        }
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("approvals/acme-contract.json");
+  });
+
   it("does not export malformed approval decision timestamps from generic step results", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot);
@@ -632,6 +693,7 @@ describe("neutral audit event writer", () => {
             schemaVersion: "flow.approval-checkpoint.v1",
             state: "approved",
             inputRef: "fixtures/manual-review/input.json",
+            inputRefDataClassification: "public",
             decidedAt: "not-a-timestamp"
           }
         }

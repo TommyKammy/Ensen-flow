@@ -573,9 +573,7 @@ const findApprovalCheckpoint = (
 
     return {
       state: value.state,
-      ...(typeof value.inputRef === "string" && isPublicSafeRelativeRef(value.inputRef)
-        ? { inputRef: value.inputRef }
-        : {}),
+      ...approvalInputRefExport(value),
       ...(typeof value.decidedAt === "string" && isStrictUtcMillisTimestamp(value.decidedAt)
         ? { decidedAt: value.decidedAt }
         : {})
@@ -590,6 +588,20 @@ const findApprovalCheckpoint = (
   }
 
   return undefined;
+};
+
+const approvalInputRefExport = (
+  value: Record<string, unknown>
+): { inputRef: string } | Record<string, never> => {
+  if (
+    typeof value.inputRef !== "string" ||
+    value.inputRefDataClassification !== "public" ||
+    !isPublicSafeRelativeRef(value.inputRef)
+  ) {
+    return {};
+  }
+
+  return { inputRef: value.inputRef };
 };
 
 const isExportableApprovalState = (

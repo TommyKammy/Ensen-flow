@@ -737,6 +737,12 @@ const collectEvidenceRefsFromValue = (
     } else {
       diagnostics.push(createUnsafeEvidenceRefDiagnostic(envelopeEvidenceRef));
     }
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (key !== "evidenceBundleRef") {
+        collectEvidenceRefsFromValue(nestedValue, refs, diagnostics);
+      }
+    }
     return;
   }
 
@@ -762,12 +768,45 @@ const normalizeEvidenceEnvelopeRef = (
     return undefined;
   }
 
-  return normalizeEvidenceRef(
-    value.evidenceBundleRef,
-    Object.hasOwn(value, "dataClassification")
-      ? value.dataClassification
-      : EVIDENCE_CLASSIFICATION_NOT_PROVIDED
+  return normalizeEvidenceRef(value.evidenceBundleRef, selectEnvelopeEvidenceClassification(value));
+};
+
+const selectEnvelopeEvidenceClassification = (value: Record<string, unknown>): unknown => {
+  const evidenceBundleRef = value.evidenceBundleRef;
+  if (!isRecord(evidenceBundleRef)) {
+    return EVIDENCE_CLASSIFICATION_NOT_PROVIDED;
+  }
+
+  const envelopeClassification = Object.hasOwn(value, "dataClassification")
+    ? value.dataClassification
+    : EVIDENCE_CLASSIFICATION_NOT_PROVIDED;
+  if (!Object.hasOwn(evidenceBundleRef, "dataClassification")) {
+    return envelopeClassification;
+  }
+
+  const evidenceRefId =
+    typeof evidenceBundleRef.id === "string" ? evidenceBundleRef.id : "<unknown-evidence-ref>";
+  const refClassification = normalizeDataClassification(
+    evidenceBundleRef.dataClassification,
+    evidenceRefId
   );
+  const normalizedEnvelopeClassification =
+    envelopeClassification === EVIDENCE_CLASSIFICATION_NOT_PROVIDED
+      ? undefined
+      : normalizeDataClassification(envelopeClassification, evidenceRefId);
+
+  if (refClassification !== undefined && refClassification !== "public") {
+    return refClassification;
+  }
+
+  if (
+    normalizedEnvelopeClassification !== undefined &&
+    normalizedEnvelopeClassification !== "public"
+  ) {
+    return normalizedEnvelopeClassification;
+  }
+
+  return refClassification ?? normalizedEnvelopeClassification;
 };
 
 const normalizeEvidenceRef = (

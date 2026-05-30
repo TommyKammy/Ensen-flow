@@ -176,7 +176,9 @@ describe("selected controlled pilot dry-run package", () => {
                     correlationId: "corr_controlled_pilot_default_fake_notification",
                     type: "local_path",
                     uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
-                    createdAt: "2026-05-30T00:00:00.000Z"
+                    createdAt: expect.stringMatching(
+                      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u
+                    )
                   }
                 }
               }
@@ -207,6 +209,50 @@ describe("selected controlled pilot dry-run package", () => {
         })
       ])
     );
+  });
+
+  it("derives the default pilot evidence timestamp from the run clock", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+
+    const result = await runSelectedControlledPilot({
+      inputPackage: createPilotPackage(),
+      stateRoot,
+      auditPath,
+      now: createClock([
+        "2026-05-31T01:00:00.000Z",
+        "2026-05-31T01:00:01.000Z",
+        "2026-05-31T01:00:02.000Z",
+        "2026-05-31T01:00:03.000Z",
+        "2026-05-31T01:00:04.000Z",
+        "2026-05-31T01:00:05.000Z",
+        "2026-05-31T01:00:06.000Z"
+      ])
+    });
+
+    const notifyAttempt = result.stepAttempts["notify-operator"]?.[0]?.result as {
+      executor?: {
+        observedAt?: string;
+        result?: {
+          evidence?: {
+            transport?: {
+              evidenceBundleRef?: {
+                createdAt?: string;
+              };
+            };
+          };
+        };
+      };
+    };
+
+    expect(notifyAttempt.executor?.result?.evidence?.transport?.evidenceBundleRef).toMatchObject({
+      id: "evb_controlled_pilot_default_fake_notification",
+      createdAt: notifyAttempt.executor?.observedAt
+    });
+    expect(
+      notifyAttempt.executor?.result?.evidence?.transport?.evidenceBundleRef?.createdAt
+    ).not.toBe("2026-05-30T00:00:00.000Z");
   });
 
   it("exports a public-safe evidence ref from the default CLI fake transport path", async () => {

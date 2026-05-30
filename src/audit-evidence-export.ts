@@ -166,7 +166,7 @@ export interface AuditEvidenceExportRecoveryReplayStep {
     reasonExported: false;
   };
   approval?: {
-    state: string;
+    state: AuditEvidenceExportApprovalState;
     inputRef?: string;
     decidedAt?: string;
     reasonExported: false;
@@ -182,6 +182,7 @@ type EvidenceDataClassification =
   | "customer-confidential"
   | "regulated"
   | "restricted";
+export type AuditEvidenceExportApprovalState = "approval-required" | "approved" | "rejected";
 
 type NormalizedEvidenceRef = Omit<
   AuditEvidenceExportEvidenceRef,
@@ -194,6 +195,7 @@ type NormalizedEvidenceRef = Omit<
 interface AuditEvidenceExportRunScope {
   runId: string;
   workflowId: string;
+  workflowVersion: string;
 }
 
 export interface AuditEvidenceExportLocalConfidentialReferences {
@@ -210,6 +212,11 @@ export interface AuditEvidenceExportLocalReference {
 const EXPORT_SCHEMA_VERSION = "flow.audit-evidence-export.v1";
 const EVIDENCE_REF_SCHEMA_VERSION = "eip.evidence-bundle-ref.v1";
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const EXPORTABLE_APPROVAL_STATES = new Set<AuditEvidenceExportApprovalState>([
+  "approval-required",
+  "approved",
+  "rejected"
+]);
 
 export const createAuditEvidenceExport = async (
   input: CreateAuditEvidenceExportInput
@@ -335,7 +342,9 @@ const filterAuditEventsForRun = (
 ): NeutralAuditEvent[] =>
   auditEvents.filter(
     (event) =>
-      event.run.id === state.run.runId && event.workflow.id === state.run.workflowId
+      event.run.id === state.run.runId &&
+      event.workflow.id === state.run.workflowId &&
+      event.workflow.version === state.run.workflowVersion
   );
 
 const summarizeStepAttempts = (
@@ -392,6 +401,7 @@ const validateNeutralAuditEventForExport = (
     typeof value.occurredAt !== "string" ||
     !isRecord(value.workflow) ||
     typeof value.workflow.id !== "string" ||
+    typeof value.workflow.version !== "string" ||
     !isRecord(value.run) ||
     typeof value.run.id !== "string"
   ) {
@@ -441,7 +451,8 @@ const createRecoveryReplaySummary = (
   const recoveryClassification = classifyRecoveryReplay(state);
   const runScope: AuditEvidenceExportRunScope = {
     runId: state.run.runId,
-    workflowId: state.run.workflowId
+    workflowId: state.run.workflowId,
+    workflowVersion: state.run.workflowVersion
   };
 
   return {
@@ -484,6 +495,7 @@ const summarizeRecoveryReplayStep = (
         (event) =>
           event.run.id === runScope.runId &&
           event.workflow.id === runScope.workflowId &&
+          event.workflow.version === runScope.workflowVersion &&
           event.step?.id === stepId &&
           event.step.attempt === attempt.attempt
       )
@@ -534,7 +546,9 @@ const approvalSummaryFromAttempt = (
 
 const findApprovalCheckpoint = (
   value: unknown
-): { state: string; inputRef?: string; decidedAt?: string } | undefined => {
+):
+  | { state: AuditEvidenceExportApprovalState; inputRef?: string; decidedAt?: string }
+  | undefined => {
   if (Array.isArray(value)) {
     for (const item of value) {
       const nested = findApprovalCheckpoint(item);
@@ -550,7 +564,11 @@ const findApprovalCheckpoint = (
     return undefined;
   }
 
-  if (value.schemaVersion === "flow.approval-checkpoint.v1" && typeof value.state === "string") {
+  if (value.schemaVersion === "flow.approval-checkpoint.v1") {
+    if (!isExportableApprovalState(value.state)) {
+      return undefined;
+    }
+
     return {
       state: value.state,
       ...(typeof value.inputRef === "string" && isPublicSafeRelativeRef(value.inputRef)
@@ -569,6 +587,12 @@ const findApprovalCheckpoint = (
 
   return undefined;
 };
+
+const isExportableApprovalState = (
+  value: unknown
+): value is AuditEvidenceExportApprovalState =>
+  typeof value === "string" &&
+  EXPORTABLE_APPROVAL_STATES.has(value as AuditEvidenceExportApprovalState);
 
 const evidenceRefIdsFromAttempt = (attempt: WorkflowStepAttemptEventSummary): string[] => {
   if (attempt.result === undefined) {

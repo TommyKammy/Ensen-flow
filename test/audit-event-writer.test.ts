@@ -542,6 +542,62 @@ describe("neutral audit event writer", () => {
     );
   });
 
+  it("does not export unknown approval checkpoint states from generic step results", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "unknown-approval-state.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "unknown-approval-state",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z"
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "unknown-approval-state",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "unknown-approval-state",
+      stepId: "generic-step",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: {
+        metadata: {
+          approvalCheckpoint: {
+            schemaVersion: "flow.approval-checkpoint.v1",
+            state: "raw-customer-approval-note",
+            inputRef: "fixtures/manual-review/input.json",
+            decidedAt: "2026-04-29T00:00:03.000Z"
+          }
+        }
+      }
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "run.completed",
+      runId: "unknown-approval-state",
+      terminalState: "succeeded",
+      occurredAt: "2026-04-29T00:00:04.000Z"
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.not.objectContaining({
+        approval: expect.anything()
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe)).not.toContain("raw-customer-approval-note");
+  });
+
   it("rejects extra export-audit-evidence CLI arguments", async () => {
     const originalError = console.error;
     const errors: string[] = [];

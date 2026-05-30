@@ -801,9 +801,23 @@ describe("selected controlled pilot dry-run package", () => {
         outcome: { status: "succeeded" }
       },
       {
-        id: `audit.${approved.run.runId}.999999`,
+        id: `audit.${approved.run.runId}.999998`,
         type: "step.completed",
         occurredAt: "2026-05-30T00:00:11.000Z",
+        actor: { type: "system", id: "ensen-flow.local-runner" },
+        source: { type: "runner", id: "ensen-flow.local-runner" },
+        workflow: {
+          id: approved.run.workflowId,
+          version: "flow.workflow.other-version"
+        },
+        run: { id: approved.run.runId },
+        step: { id: "human-approval", attempt: 1 },
+        outcome: { status: "succeeded" }
+      },
+      {
+        id: `audit.${approved.run.runId}.999999`,
+        type: "step.completed",
+        occurredAt: "2026-05-30T00:00:12.000Z",
         actor: { type: "system", id: "ensen-flow.local-runner" },
         source: { type: "runner", id: "ensen-flow.local-runner" },
         workflow: {
@@ -906,6 +920,7 @@ describe("selected controlled pilot dry-run package", () => {
     expect(approvedExport.publicSafe.auditEvents.map((event) => event.id)).not.toEqual(
       expect.arrayContaining([
         "audit.other-controlled-pilot-run.000001",
+        `audit.${approved.run.runId}.999998`,
         `audit.${approved.run.runId}.999999`
       ])
     );

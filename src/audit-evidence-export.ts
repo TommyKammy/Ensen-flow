@@ -667,6 +667,10 @@ const classifyRecoveryReplay = (
     return "blocked";
   }
 
+  if (hasLatestStepStatus(state, "manual-repair-needed")) {
+    return "manual-repair-needed";
+  }
+
   if (hasLatestStepStatus(state, "failed")) {
     return "manual-repair-needed";
   }

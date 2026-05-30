@@ -362,6 +362,64 @@ describe("neutral audit event writer", () => {
     ]);
   });
 
+  it("treats manual-repair-needed step attempts as non-recoverable in replay export", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot);
+    const statePath = join(stateRoot, "runs", "manual-repair-needed.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "manual-repair-needed",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v1",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "manual-repair-needed",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.failed",
+      runId: "manual-repair-needed",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      retry: {
+        retryable: false,
+        reason: "Operator must repair external state before replay."
+      },
+      recovery: {
+        state: "manual-repair-needed",
+        decision: "manual-repair-needed",
+        reason: "Operator must repair external state before replay."
+      }
+    });
+
+    const exported = await createAuditEvidenceExport({ statePath });
+
+    expect(exported.publicSafe.recoveryReplay).toMatchObject({
+      run: {
+        status: "running",
+        recoveryClassification: "manual-repair-needed",
+        replayAction: "operator-review-required"
+      },
+      stepHistory: [
+        expect.objectContaining({
+          stepId: "collect-input",
+          attempt: 1,
+          status: "manual-repair-needed"
+        })
+      ]
+    });
+  });
+
   it("omits non-public evidence paths from public-safe exports", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot);

@@ -161,6 +161,44 @@ describe("selected controlled pilot dry-run package", () => {
     }
     const state = await readWorkflowRunState(join(stateRoot, `${runId}.jsonl`));
     expect(state.run.status).toBe("succeeded");
+    expect(state.stepAttempts["notify-operator"]).toMatchObject([
+      {
+        status: "succeeded",
+        result: {
+          executor: {
+            result: {
+              evidence: {
+                transport: {
+                  dataClassification: "public",
+                  evidenceBundleRef: {
+                    schemaVersion: "eip.evidence-bundle-ref.v1",
+                    id: "evb_controlled_pilot_default_fake_notification",
+                    correlationId: "corr_controlled_pilot_default_fake_notification",
+                    type: "local_path",
+                    uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+                    createdAt: "2026-05-30T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]);
+    const defaultEvidenceRef = (
+      state.stepAttempts["notify-operator"]?.[0]?.result as {
+        executor?: {
+          result?: {
+            evidence?: {
+              transport?: {
+                evidenceBundleRef?: Record<string, unknown>;
+              };
+            };
+          };
+        };
+      }
+    ).executor?.result?.evidence?.transport?.evidenceBundleRef;
+    expect(defaultEvidenceRef).not.toHaveProperty("dataClassification");
     await expect(readAuditEvents(auditPath)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({

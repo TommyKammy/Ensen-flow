@@ -212,6 +212,7 @@ export interface AuditEvidenceExportLocalReference {
 const EXPORT_SCHEMA_VERSION = "flow.audit-evidence-export.v1";
 const EVIDENCE_REF_SCHEMA_VERSION = "eip.evidence-bundle-ref.v1";
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const EVIDENCE_CLASSIFICATION_NOT_PROVIDED = Symbol("evidenceClassificationNotProvided");
 const ISO_UTC_MILLIS_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const EXPORTABLE_APPROVAL_STATES = new Set<AuditEvidenceExportApprovalState>([
@@ -729,6 +730,16 @@ const collectEvidenceRefsFromValue = (
     return;
   }
 
+  const envelopeEvidenceRef = normalizeEvidenceEnvelopeRef(value);
+  if (envelopeEvidenceRef !== undefined) {
+    if (isPublicSafeEvidenceRef(envelopeEvidenceRef)) {
+      refs.push(envelopeEvidenceRef);
+    } else {
+      diagnostics.push(createUnsafeEvidenceRefDiagnostic(envelopeEvidenceRef));
+    }
+    return;
+  }
+
   const evidenceRef = normalizeEvidenceRef(value);
   if (evidenceRef !== undefined) {
     if (isPublicSafeEvidenceRef(evidenceRef)) {
@@ -744,8 +755,24 @@ const collectEvidenceRefsFromValue = (
   }
 };
 
-const normalizeEvidenceRef = (
+const normalizeEvidenceEnvelopeRef = (
   value: Record<string, unknown>
+): NormalizedEvidenceRef | undefined => {
+  if (!isRecord(value.evidenceBundleRef)) {
+    return undefined;
+  }
+
+  return normalizeEvidenceRef(
+    value.evidenceBundleRef,
+    Object.hasOwn(value, "dataClassification")
+      ? value.dataClassification
+      : EVIDENCE_CLASSIFICATION_NOT_PROVIDED
+  );
+};
+
+const normalizeEvidenceRef = (
+  value: Record<string, unknown>,
+  dataClassificationOverride: unknown = EVIDENCE_CLASSIFICATION_NOT_PROVIDED
 ): NormalizedEvidenceRef | undefined => {
   if (value.schemaVersion !== EVIDENCE_REF_SCHEMA_VERSION) {
     return undefined;
@@ -762,8 +789,12 @@ const normalizeEvidenceRef = (
   }
 
   const checksum = normalizeChecksum(value.checksum);
+  const classificationValue =
+    dataClassificationOverride === EVIDENCE_CLASSIFICATION_NOT_PROVIDED
+      ? value.dataClassification
+      : dataClassificationOverride;
   const dataClassification = normalizeDataClassification(
-    value.dataClassification,
+    classificationValue,
     typeof value.id === "string" ? value.id : "<unknown-evidence-ref>"
   );
   return {

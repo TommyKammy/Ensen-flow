@@ -32,14 +32,14 @@ const selectedControlledPilotDefaultNotificationOutcome: HttpNotificationOutcome
   status: "succeeded",
   summary: "local fake notification accepted",
   evidence: {
+    dataClassification: "public",
     evidenceBundleRef: {
       schemaVersion: "eip.evidence-bundle-ref.v1",
       id: "evb_controlled_pilot_default_fake_notification",
       correlationId: "corr_controlled_pilot_default_fake_notification",
       type: "local_path",
       uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
-      createdAt: "2026-05-30T00:00:00.000Z",
-      dataClassification: "public"
+      createdAt: "2026-05-30T00:00:00.000Z"
     }
   }
 };

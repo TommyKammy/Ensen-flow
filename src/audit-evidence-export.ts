@@ -28,6 +28,16 @@ export interface AuditEvidenceExportBoundary {
     name: "ensen-protocol";
     version: "0.4.0";
   };
+  protocolEvidenceProfileSnapshot: {
+    name: "ensen-protocol";
+    version: "0.3.0";
+    profile: "operational-evidence-profile.v1";
+  };
+  trackBBoundarySnapshot: {
+    name: "ensen-protocol";
+    version: "0.4.0";
+    boundary: "Track B customer-regulated data classification";
+  };
   protocolEvidenceProfile: "operational-evidence-profile.v1";
   notes: string[];
 }
@@ -55,6 +65,7 @@ export interface AuditEvidenceExportPublicSafe {
   steps: AuditEvidenceExportStepSummary[];
   auditEvents: AuditEvidenceExportAuditEventSummary[];
   evidenceRefs: AuditEvidenceExportEvidenceRef[];
+  recoveryReplay: AuditEvidenceExportRecoveryReplay;
   diagnostics: string[];
 }
 
@@ -116,6 +127,54 @@ export interface AuditEvidenceExportEvidenceRef {
   checksumPresence: "present" | "absent";
 }
 
+export interface AuditEvidenceExportRecoveryReplay {
+  source: "workflow-run-state-and-neutral-audit";
+  run: {
+    status: string;
+    terminalState?: string;
+    recoveryClassification:
+      | "recoverable"
+      | "terminal"
+      | "approval-required"
+      | "blocked"
+      | "manual-repair-needed";
+    replayAction:
+      | "resume-from-projected-state"
+      | "do-not-replay"
+      | "operator-review-required";
+  };
+  trigger: {
+    idempotencyKeyBound: boolean;
+    keyExported: false;
+  };
+  stepHistory: AuditEvidenceExportRecoveryReplayStep[];
+}
+
+export interface AuditEvidenceExportRecoveryReplayStep {
+  stepId: string;
+  attempt: number;
+  status: string;
+  auditEventIds: string[];
+  retry?: {
+    retryable: boolean;
+    nextAttemptAt?: string;
+    reasonExported: false;
+  };
+  recovery?: {
+    state: string;
+    decision: string;
+    reasonExported: false;
+  };
+  approval?: {
+    state: string;
+    inputRef?: string;
+    decidedAt?: string;
+    reasonExported: false;
+    decidedByExported: false;
+  };
+  evidenceRefIds: string[];
+}
+
 type EvidenceDataClassification =
   | "public"
   | "internal"
@@ -166,11 +225,21 @@ export const createAuditEvidenceExport = async (
         name: "ensen-protocol",
         version: "0.4.0"
       },
+      protocolEvidenceProfileSnapshot: {
+        name: "ensen-protocol",
+        version: "0.3.0",
+        profile: "operational-evidence-profile.v1"
+      },
+      trackBBoundarySnapshot: {
+        name: "ensen-protocol",
+        version: "0.4.0",
+        boundary: "Track B customer-regulated data classification"
+      },
       protocolEvidenceProfile: "operational-evidence-profile.v1",
       notes: [
         "This is a deterministic local metadata export skeleton.",
         "It is not a production evidence archive, compliance bundle, or customer data export.",
-        "It uses the copied Protocol v0.4.0 operational evidence and Track B classification vocabulary without claiming protocol conformance, regulated workflow execution, or production evidence readiness."
+        "It uses copied Protocol v0.3.0 operational evidence profile and Protocol v0.4.0 Track B boundary snapshots without runtime protocol imports, protocol conformance claims, regulated workflow execution, or production evidence readiness."
       ]
     },
     publicSafe: {
@@ -219,6 +288,7 @@ export const createAuditEvidenceExport = async (
       steps: summarizeStepAttempts(state),
       auditEvents: auditEvents.map(summarizeAuditEvent),
       evidenceRefs: collectPublicEvidenceRefs(state, diagnostics),
+      recoveryReplay: createRecoveryReplaySummary(state, auditEvents),
       diagnostics
     },
     localConfidentialReferences: {
@@ -348,6 +418,189 @@ const summarizeAuditEvent = (
       }),
   ...(event.outcome === undefined ? {} : { outcomeStatus: event.outcome.status })
 });
+
+const createRecoveryReplaySummary = (
+  state: WorkflowRunState,
+  auditEvents: NeutralAuditEvent[]
+): AuditEvidenceExportRecoveryReplay => {
+  const recoveryClassification = classifyRecoveryReplay(state);
+
+  return {
+    source: "workflow-run-state-and-neutral-audit",
+    run: {
+      status: state.run.status,
+      ...(state.run.terminalState === undefined
+        ? {}
+        : { terminalState: state.run.terminalState }),
+      recoveryClassification,
+      replayAction: recoveryReplayAction(recoveryClassification)
+    },
+    trigger: {
+      idempotencyKeyBound: state.run.trigger.idempotencyKey !== undefined,
+      keyExported: false
+    },
+    stepHistory: Object.entries(state.stepAttempts).flatMap(([stepId, attempts]) =>
+      attempts.map((attempt) => summarizeRecoveryReplayStep(stepId, attempt, auditEvents))
+    )
+  };
+};
+
+const summarizeRecoveryReplayStep = (
+  stepId: string,
+  attempt: WorkflowStepAttemptEventSummary,
+  auditEvents: NeutralAuditEvent[]
+): AuditEvidenceExportRecoveryReplayStep => {
+  const approval = approvalSummaryFromAttempt(attempt);
+  const evidenceRefIds = evidenceRefIdsFromAttempt(attempt);
+
+  return {
+    stepId,
+    attempt: attempt.attempt,
+    status: attempt.status,
+    auditEventIds: auditEvents
+      .filter((event) => event.step?.id === stepId && event.step.attempt === attempt.attempt)
+      .map((event) => event.id),
+    ...(attempt.retry === undefined
+      ? {}
+      : {
+          retry: {
+            retryable: attempt.retry.retryable,
+            ...(attempt.retry.nextAttemptAt === undefined
+              ? {}
+              : { nextAttemptAt: attempt.retry.nextAttemptAt }),
+            reasonExported: false
+          }
+        }),
+    ...(attempt.recovery === undefined
+      ? {}
+      : {
+          recovery: {
+            state: attempt.recovery.state,
+            decision: attempt.recovery.decision,
+            reasonExported: false
+          }
+        }),
+    ...(approval === undefined ? {} : { approval }),
+    evidenceRefIds
+  };
+};
+
+type WorkflowStepAttemptEventSummary = WorkflowRunState["stepAttempts"][string][number];
+
+const approvalSummaryFromAttempt = (
+  attempt: WorkflowStepAttemptEventSummary
+): AuditEvidenceExportRecoveryReplayStep["approval"] | undefined => {
+  const approval = findApprovalCheckpoint(attempt.result);
+  if (approval === undefined) {
+    return undefined;
+  }
+
+  return {
+    state: approval.state,
+    ...(approval.inputRef === undefined ? {} : { inputRef: approval.inputRef }),
+    ...(approval.decidedAt === undefined ? {} : { decidedAt: approval.decidedAt }),
+    reasonExported: false,
+    decidedByExported: false
+  };
+};
+
+const findApprovalCheckpoint = (
+  value: unknown
+): { state: string; inputRef?: string; decidedAt?: string } | undefined => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findApprovalCheckpoint(item);
+      if (nested !== undefined) {
+        return nested;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (value.schemaVersion === "flow.approval-checkpoint.v1" && typeof value.state === "string") {
+    return {
+      state: value.state,
+      ...(typeof value.inputRef === "string" && isPublicSafeRelativeRef(value.inputRef)
+        ? { inputRef: value.inputRef }
+        : {}),
+      ...(typeof value.decidedAt === "string" ? { decidedAt: value.decidedAt } : {})
+    };
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nested = findApprovalCheckpoint(nestedValue);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+
+  return undefined;
+};
+
+const evidenceRefIdsFromAttempt = (attempt: WorkflowStepAttemptEventSummary): string[] => {
+  if (attempt.result === undefined) {
+    return [];
+  }
+
+  const refs: AuditEvidenceExportEvidenceRef[] = [];
+  collectEvidenceRefsFromValue(attempt.result, refs, []);
+  return refs.map((ref) => ref.id);
+};
+
+const classifyRecoveryReplay = (
+  state: WorkflowRunState
+): AuditEvidenceExportRecoveryReplay["run"]["recoveryClassification"] => {
+  if (state.run.terminalState === "failed" && hasLatestStepStatus(state, "blocked")) {
+    return "blocked";
+  }
+
+  if (state.run.terminalState !== undefined) {
+    return "terminal";
+  }
+
+  if (hasLatestStepStatus(state, "running")) {
+    return "manual-repair-needed";
+  }
+
+  if (hasLatestStepStatus(state, "approval-required")) {
+    return "approval-required";
+  }
+
+  if (hasLatestStepStatus(state, "blocked")) {
+    return "blocked";
+  }
+
+  if (hasLatestStepStatus(state, "failed")) {
+    return "manual-repair-needed";
+  }
+
+  return "recoverable";
+};
+
+const recoveryReplayAction = (
+  classification: AuditEvidenceExportRecoveryReplay["run"]["recoveryClassification"]
+): AuditEvidenceExportRecoveryReplay["run"]["replayAction"] => {
+  if (classification === "terminal") {
+    return "do-not-replay";
+  }
+
+  if (classification === "recoverable") {
+    return "resume-from-projected-state";
+  }
+
+  return "operator-review-required";
+};
+
+const hasLatestStepStatus = (
+  state: WorkflowRunState,
+  status: WorkflowStepAttemptEventSummary["status"]
+): boolean =>
+  Object.values(state.stepAttempts).some((attempts) => attempts.at(-1)?.status === status);
 
 const collectPublicEvidenceRefs = (
   state: WorkflowRunState,
@@ -524,6 +777,9 @@ const isSafeRelativePath = (value: string): boolean => {
     !trimmed.split(/[\\/]+/u).includes("..")
   );
 };
+
+const isPublicSafeRelativeRef = (value: string): boolean =>
+  isSafeRelativePath(value) && classifyUnsafeWorkflowArtifactString(value) === undefined;
 
 const createUnsafeEvidenceRefDiagnostic = (ref: NormalizedEvidenceRef): string => {
   if (ref.dataClassification === undefined) {

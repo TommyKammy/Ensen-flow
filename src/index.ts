@@ -199,6 +199,8 @@ export type {
   AuditEvidenceExportLocalConfidentialReferences,
   AuditEvidenceExportLocalReference,
   AuditEvidenceExportPublicSafe,
+  AuditEvidenceExportRecoveryReplay,
+  AuditEvidenceExportRecoveryReplayStep,
   AuditEvidenceExportStepSummary,
   CreateAuditEvidenceExportInput
 } from "./audit-evidence-export.js";

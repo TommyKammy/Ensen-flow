@@ -171,6 +171,79 @@ describe("selected controlled pilot dry-run package", () => {
     );
   });
 
+  it("exports a public-safe evidence ref from the default CLI fake transport path", async () => {
+    const root = await createTempRoot();
+    const stateRoot = join(root, "runs");
+    const auditPath = join(root, "audit", "pilot.audit.jsonl");
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown): void => {
+      logs.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "run-controlled-pilot",
+          "fixtures/controlled-pilot/webhook-review-notification.dry-run.json",
+          stateRoot,
+          auditPath
+        ])
+      ).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = JSON.parse(logs.join("\n")) as Record<string, unknown>;
+    const runId = output.runId;
+    if (typeof runId !== "string") {
+      throw new Error("CLI output runId must be a string");
+    }
+
+    logs.length = 0;
+    console.log = (message?: unknown): void => {
+      logs.push(String(message));
+    };
+
+    try {
+      await expect(
+        runCli([
+          "export-audit-evidence",
+          join(stateRoot, `${runId}.jsonl`),
+          auditPath
+        ])
+      ).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const exported = JSON.parse(logs.join("\n")) as {
+      boundary: { notes: string[] };
+      publicSafe: {
+        evidenceRefs: Array<{
+          schemaVersion: string;
+          id: string;
+          type: string;
+          uri: string;
+          dataClassification: string;
+        }>;
+      };
+    };
+    expect(exported.publicSafe.evidenceRefs).toEqual([
+      expect.objectContaining({
+        schemaVersion: "eip.evidence-bundle-ref.v1",
+        id: "evb_controlled_pilot_default_fake_notification",
+        type: "local_path",
+        uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+        dataClassification: "public"
+      })
+    ]);
+    expect(JSON.stringify(exported.publicSafe.evidenceRefs)).not.toContain(root);
+    expect(exported.boundary.notes.join("\n")).toContain(
+      "It is not a production evidence archive, compliance bundle, or customer data export."
+    );
+  });
+
   it("binds approval to the normalized webhook input fingerprint", async () => {
     const inputPackage = createPilotPackage();
     inputPackage.webhook.headers = {

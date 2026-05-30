@@ -310,7 +310,23 @@ export const createFakeHttpNotificationTransport = (
   const deliveries: HttpNotificationTransportDelivery[] = [];
   const outcomes =
     input.outcomes === undefined || input.outcomes.length === 0
-      ? [{ status: "succeeded" as const, summary: "local fake notification accepted" }]
+      ? [
+          {
+            status: "succeeded" as const,
+            summary: "local fake notification accepted",
+            evidence: {
+              evidenceBundleRef: {
+                schemaVersion: "eip.evidence-bundle-ref.v1",
+                id: "evb_controlled_pilot_default_fake_notification",
+                correlationId: "corr_controlled_pilot_default_fake_notification",
+                type: "local_path",
+                uri: "artifacts/evidence/controlled-pilot/default-fake-notification.json",
+                createdAt: "2026-05-30T00:00:00.000Z",
+                dataClassification: "public"
+              }
+            }
+          }
+        ]
       : input.outcomes;
 
   return {

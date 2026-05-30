@@ -342,11 +342,12 @@ const filterAuditEventsForRun = (
   state: WorkflowRunState,
   auditEvents: NeutralAuditEvent[]
 ): NeutralAuditEvent[] =>
-  auditEvents.filter(
-    (event) =>
-      event.run.id === state.run.runId &&
-      event.workflow.id === state.run.workflowId &&
-      event.workflow.version === state.run.workflowVersion
+  auditEvents.filter((event) =>
+    auditEventMatchesRunScope(event, {
+      runId: state.run.runId,
+      workflowId: state.run.workflowId,
+      workflowVersion: state.run.workflowVersion
+    })
   );
 
 const summarizeStepAttempts = (
@@ -495,9 +496,7 @@ const summarizeRecoveryReplayStep = (
     auditEventIds: auditEvents
       .filter(
         (event) =>
-          event.run.id === runScope.runId &&
-          event.workflow.id === runScope.workflowId &&
-          event.workflow.version === runScope.workflowVersion &&
+          auditEventMatchesRunScope(event, runScope) &&
           event.step?.id === stepId &&
           event.step.attempt === attempt.attempt
       )
@@ -567,12 +566,13 @@ const findApprovalCheckpoint = (
   }
 
   if (value.schemaVersion === "flow.approval-checkpoint.v1") {
-    if (!isExportableApprovalState(value.state)) {
+    const state = normalizeApprovalState(value.state);
+    if (state === undefined) {
       return undefined;
     }
 
     return {
-      state: value.state,
+      state,
       ...approvalInputRefExport(value),
       ...(typeof value.decidedAt === "string" && isStrictUtcMillisTimestamp(value.decidedAt)
         ? { decidedAt: value.decidedAt }
@@ -604,11 +604,26 @@ const approvalInputRefExport = (
   return { inputRef: value.inputRef };
 };
 
-const isExportableApprovalState = (
+const auditEventMatchesRunScope = (
+  event: NeutralAuditEvent,
+  runScope: AuditEvidenceExportRunScope
+): boolean =>
+  event.run.id === runScope.runId &&
+  event.workflow.id === runScope.workflowId &&
+  event.workflow.version === runScope.workflowVersion;
+
+const normalizeApprovalState = (
   value: unknown
-): value is AuditEvidenceExportApprovalState =>
-  typeof value === "string" &&
-  EXPORTABLE_APPROVAL_STATES.has(value as AuditEvidenceExportApprovalState);
+): AuditEvidenceExportApprovalState | undefined => {
+  if (
+    typeof value === "string" &&
+    EXPORTABLE_APPROVAL_STATES.has(value as AuditEvidenceExportApprovalState)
+  ) {
+    return value as AuditEvidenceExportApprovalState;
+  }
+
+  return undefined;
+};
 
 const isStrictUtcMillisTimestamp = (value: string): boolean => {
   if (!ISO_UTC_MILLIS_TIMESTAMP_PATTERN.test(value)) {

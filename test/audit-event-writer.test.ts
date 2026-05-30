@@ -270,6 +270,98 @@ describe("neutral audit event writer", () => {
     );
   });
 
+  it("filters audit summaries and replay IDs by run, workflow, and version", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    const auditRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
+    tempRoots.push(stateRoot, auditRoot);
+    const statePath = join(stateRoot, "runs", "scoped-audit-replay.jsonl");
+    const auditPath = join(auditRoot, "audit", "scoped-audit-replay.audit.jsonl");
+
+    await createWorkflowRun(statePath, {
+      runId: "deterministic-run",
+      workflowId: "local-manual-demo",
+      workflowVersion: "flow.workflow.v2",
+      trigger: {
+        type: "manual",
+        receivedAt: "2026-04-29T00:00:00.000Z",
+        context: {}
+      },
+      createdAt: "2026-04-29T00:00:01.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.started",
+      runId: "deterministic-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:02.000Z"
+    });
+    await appendWorkflowRunEvent(statePath, {
+      type: "step.attempt.completed",
+      runId: "deterministic-run",
+      stepId: "collect-input",
+      attempt: 1,
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      result: { ok: true }
+    });
+
+    const scopedAuditEvent = (
+      id: string,
+      scope: { runId: string; workflowId: string; workflowVersion: string }
+    ) => ({
+      id,
+      type: "step.completed",
+      occurredAt: "2026-04-29T00:00:03.000Z",
+      actor: { type: "system", id: "ensen-flow.local-runner" },
+      source: { type: "runner", id: "ensen-flow.local-runner" },
+      workflow: { id: scope.workflowId, version: scope.workflowVersion },
+      run: { id: scope.runId },
+      step: { id: "collect-input", attempt: 1 },
+      outcome: { status: "succeeded" }
+    });
+    await mkdir(dirname(auditPath), { recursive: true });
+    await writeFile(
+      auditPath,
+      [
+        scopedAuditEvent("audit.deterministic-run.000001", {
+          runId: "deterministic-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.other-run.000001", {
+          runId: "other-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.deterministic-run.000002", {
+          runId: "deterministic-run",
+          workflowId: "other-workflow",
+          workflowVersion: "flow.workflow.v2"
+        }),
+        scopedAuditEvent("audit.deterministic-run.000003", {
+          runId: "deterministic-run",
+          workflowId: "local-manual-demo",
+          workflowVersion: "flow.workflow.v1"
+        })
+      ]
+        .map((event) => JSON.stringify(event))
+        .join("\n") + "\n",
+      "utf8"
+    );
+
+    const exported = await createAuditEvidenceExport({ statePath, auditPath });
+
+    expect(exported.publicSafe.auditEvents.map((event) => event.id)).toEqual([
+      "audit.deterministic-run.000001"
+    ]);
+    expect(exported.publicSafe.recoveryReplay.stepHistory).toEqual([
+      expect.objectContaining({
+        stepId: "collect-input",
+        attempt: 1,
+        auditEventIds: ["audit.deterministic-run.000001"]
+      })
+    ]);
+  });
+
   it("omits non-public evidence paths from public-safe exports", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "ensen-flow-audit-export-"));
     tempRoots.push(stateRoot);
